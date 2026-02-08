@@ -1,0 +1,7 @@
+Use this command to initialize fastapi on local 
+
+pip install fastapi uvicorn
+
+To run the backend 
+
+uvicorn app.main:app --reload
