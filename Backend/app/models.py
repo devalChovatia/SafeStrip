@@ -81,13 +81,14 @@ class AlertRule(Base):
     __tablename__ = 'alert_rules'
     
     rule_id = Column(Integer, primary_key=True, index=True)
+    sensor_id = Column(Integer, ForeignKey('sensors.sensor_id'), nullable=True)
     sensor_type = Column(String, nullable=False)
     severity = Column(String, nullable=False)
     comparator = Column(String, nullable=False)
     threshold_value = Column(Float, nullable=False)
     duration_seconds = Column(Integer)
     enabled = Column(Boolean, default=True)
-    sensor_type_rel = relationship('Sensor', foreign_keys=[sensor_type], viewonly=True)
+    sensor_type_rel = relationship('Sensor', foreign_keys=[sensor_id], back_populates='alert_rules')
     alerts = relationship('Alert', back_populates='rule')
 
 
@@ -130,4 +131,3 @@ class SafetyCheckItem(Base):
     reason = Column(String)
     check = relationship('SafetyCheck', back_populates='check_items')
     outlet = relationship('Outlet', back_populates='safety_check_items')
-
