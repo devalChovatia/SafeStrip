@@ -4,23 +4,23 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from starlette import status
-from ..models import Null
+from ..models import User
 from ..database import get_db
 
 
-router = APIRouter(tags=['genre'])
+router = APIRouter(tags=['users'])
 
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
-class GenreRequest(BaseModel):
-    genre_name: str = Field(min_length=4)
+class UserRequest(BaseModel):
+    name: str = Field(min_length=1)
+    email: str = Field(min_length=5)
 
 
-@router.get('/genres', status_code=status.HTTP_200_OK)
-async def getAllGenres(db: db_dependency):
-    genres = db.query(Null).all()
-    if not genres:
-      raise HTTPException(status_code=404, detail="No Genres Available")
-    return genres
-    return genres
+@router.get('/users', status_code=status.HTTP_200_OK)
+async def getAllUsers(db: db_dependency):
+    users = db.query(User).all()
+    if not users:
+      raise HTTPException(status_code=404, detail="No Users Available")
+    return users

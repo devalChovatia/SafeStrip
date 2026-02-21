@@ -1,7 +1,15 @@
-Use this command to initialize fastapi on local 
+# Use this command to initialize fastapi on local 
 
 pip install fastapi uvicorn
 
-To run the backend 
+# To run the backend 
 
 uvicorn app.main:app --reload
+
+# To create database tables 
+
+fastapienv/bin/python -c "from app.database import engine; from app import models; models.Base.metadata.create_all(bind=engine)"
+
+# View all tables 
+
+sqlite3 safestrip.db ".tables"
