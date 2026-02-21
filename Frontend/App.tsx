@@ -1,8 +1,9 @@
 import 'react-native-url-polyfill/auto';
+import React from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { Provider } from 'react-redux';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
@@ -11,6 +12,8 @@ import { useSupabaseAuthSync } from '@/hooks/useSupabaseAuthSync';
 import { store, persistor, useAppDispatch, useAppSelector } from '@/store';
 import { clearAuth } from '@/store/slices/authSlice';
 import { supabase } from '@/lib/supabase';
+import { DashboardScreen } from '@/screens/Dashboard';
+
 import '@/global.css';
 
 function AppContent() {
@@ -43,12 +46,25 @@ function AppContent() {
     );
   }
 
+  // Show your signed-in UI (or swap to <DashboardScreen /> if you prefer)
   return (
     <View style={styles.container}>
       <Text style={styles.welcomeText}>Signed in as {session.user?.email}</Text>
+
       <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
         <Text style={styles.signOutText}>Sign out</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.signOutButton, { marginTop: 12 }]}
+        onPress={() => {
+          // Optional: show dashboard screen instead of this page
+          // If you want dashboard always, replace this whole return with <DashboardScreen />
+        }}
+      >
+        <Text style={styles.signOutText}>Go to Dashboard (optional)</Text>
+      </TouchableOpacity>
+
       <StatusBar style="light" />
     </View>
   );
@@ -60,7 +76,11 @@ export default function App() {
       <PersistGate loading={null} persistor={persistor}>
         <SafeAreaProvider>
           <GluestackUIProvider mode="dark">
+            {/* If you want Dashboard only when logged in, AppContent should decide */}
             <AppContent />
+            {/* If you want dashboard ALWAYS (not recommended), use:
+                <DashboardScreen />
+            */}
           </GluestackUIProvider>
         </SafeAreaProvider>
       </PersistGate>
