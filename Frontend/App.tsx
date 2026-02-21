@@ -20,6 +20,7 @@ function AppContent() {
   const dispatch = useAppDispatch();
   const session = useAppSelector((state) => state.auth.session);
   const initialized = useAppSelector((state) => state.auth.initialized);
+  const [showDashboard, setShowDashboard] = React.useState(false);
 
   useSupabaseAuthSync();
 
@@ -46,6 +47,15 @@ function AppContent() {
     );
   }
 
+  if (showDashboard) {
+    return (
+      <>
+        <DashboardScreen />
+        <StatusBar style="light" />
+      </>
+    );
+  }
+
   // Show your signed-in UI (or swap to <DashboardScreen /> if you prefer)
   return (
     <View style={styles.container}>
@@ -58,8 +68,7 @@ function AppContent() {
       <TouchableOpacity
         style={[styles.signOutButton, { marginTop: 12 }]}
         onPress={() => {
-          // Optional: show dashboard screen instead of this page
-          // If you want dashboard always, replace this whole return with <DashboardScreen />
+          setShowDashboard(true);
         }}
       >
         <Text style={styles.signOutText}>Go to Dashboard (optional)</Text>

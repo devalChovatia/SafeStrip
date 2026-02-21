@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 
 interface StatusCardProps {
   status: string;
@@ -16,49 +16,49 @@ export const StatusCard: React.FC<StatusCardProps> = ({
 }) => {
   const variantStyles = {
     safe: {
-      container: 'bg-green-50 border-green-200',
-      text: 'text-green-800',
-      dot: 'bg-green-500',
+      container: { backgroundColor: '#ecfdf5', borderColor: '#bbf7d0' },
+      text: { color: '#166534' },
+      dot: { backgroundColor: '#22c55e' },
     },
     warning: {
-      container: 'bg-yellow-50 border-yellow-200',
-      text: 'text-yellow-800',
-      dot: 'bg-yellow-500',
+      container: { backgroundColor: '#fffbeb', borderColor: '#fde68a' },
+      text: { color: '#92400e' },
+      dot: { backgroundColor: '#f59e0b' },
     },
     danger: {
-      container: 'bg-red-50 border-red-200',
-      text: 'text-red-800',
-      dot: 'bg-red-500',
+      container: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
+      text: { color: '#991b1b' },
+      dot: { backgroundColor: '#ef4444' },
     },
     neutral: {
-      container: 'bg-gray-50 border-gray-200',
-      text: 'text-gray-700',
-      dot: 'bg-gray-400',
+      container: { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' },
+      text: { color: '#334155' },
+      dot: { backgroundColor: '#94a3b8' },
     },
   };
 
   const styles = variantStyles[variant];
 
   return (
-    <View className={`rounded-2xl border-2 p-6 shadow-lg ${styles.container}`}>
-      <View className="flex-row items-center justify-between mb-3">
-        <View className="flex-1">
-          <Text className={`text-sm font-medium opacity-70 mb-1 ${styles.text}`}>
+    <View style={[s.card, styles.container]}>
+      <View style={s.headerRow}>
+        <View style={s.headerTextWrap}>
+          <Text style={[s.kicker, styles.text]}>
             System Status
           </Text>
-          <Text className={`text-2xl font-bold ${styles.text}`}>
+          <Text style={[s.statusText, styles.text]}>
             {status}
           </Text>
         </View>
-        <View className="flex-row items-center gap-2">
-          <View className={`w-4 h-4 rounded-full ${styles.dot} shadow-md`} />
+        <View style={s.dotWrap}>
+          <View style={[s.dot, styles.dot]} />
         </View>
       </View>
-      <View className="flex-row items-center gap-2">
-        <Text className={`text-sm font-medium opacity-75 ${styles.text}`}>
+      <View style={s.footerRow}>
+        <Text style={[s.footerStrong, styles.text]}>
           {activeCount} of {totalCount}
         </Text>
-        <Text className={`text-sm opacity-75 ${styles.text}`}>
+        <Text style={[s.footerText, styles.text]}>
           outlets active
         </Text>
       </View>
@@ -67,3 +67,53 @@ export const StatusCard: React.FC<StatusCardProps> = ({
 };
 
 export default StatusCard;
+
+const s = StyleSheet.create({
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 18,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  headerTextWrap: {
+    flex: 1,
+  },
+  kicker: {
+    fontSize: 12,
+    fontWeight: '600',
+    opacity: 0.8,
+    marginBottom: 6,
+  },
+  statusText: {
+    fontSize: 34,
+    fontWeight: '800',
+    lineHeight: 40,
+  },
+  dotWrap: {
+    marginLeft: 8,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  footerStrong: {
+    fontSize: 14,
+    fontWeight: '700',
+    opacity: 0.9,
+  },
+  footerText: {
+    fontSize: 14,
+    opacity: 0.8,
+  },
+});

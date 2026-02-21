@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
 interface Outlet {
   id: number;
@@ -67,34 +67,30 @@ export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle })
   const hasWarning = outlet.temperature > 40 || outlet.current > 8;
 
   return (
-    <View className="bg-white/90 rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
+    <View style={styles.card}>
       {/* Header */}
-      <View className="px-5 py-4 border-b border-gray-100 flex-row items-center justify-between bg-gray-50">
+      <View style={styles.header}>
         <View>
-          <Text className="font-semibold text-gray-900">{outlet.name}</Text>
-          <Text className="text-xs text-gray-500 mt-0.5">
+          <Text style={styles.outletName}>{outlet.name}</Text>
+          <Text style={styles.outletState}>
             {outlet.powerOn ? 'Active' : 'Inactive'}
           </Text>
         </View>
         <TouchableOpacity
           onPress={onPowerToggle}
-          className={`p-2.5 rounded-xl shadow-md ${
-            outlet.powerOn
-              ? 'bg-green-500'
-              : 'bg-gray-200'
-          }`}
+          style={[styles.powerButton, outlet.powerOn ? styles.powerOn : styles.powerOff]}
           activeOpacity={0.7}
         >
-          <Text className={`text-lg ${outlet.powerOn ? 'text-white' : 'text-gray-600'}`}>
+          <Text style={[styles.powerIcon, outlet.powerOn ? styles.powerIconOn : styles.powerIconOff]}>
             ⏻
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* Sensor Grid */}
-      <View className="p-5">
-        <View className="flex-row flex-wrap gap-3">
-          <View className="w-[48%]">
+      <View style={styles.sensorWrap}>
+        <View style={styles.sensorRow}>
+          <View style={styles.sensorCell}>
             <SensorReading
               icon="🌡️"
               label="Temp"
@@ -104,7 +100,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle })
             />
           </View>
           
-          <View className="w-[48%]">
+          <View style={styles.sensorCell}>
             <SensorReading
               icon="⚡"
               label="Current"
@@ -114,7 +110,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle })
             />
           </View>
           
-          <View className="w-[48%]">
+          <View style={styles.sensorCell}>
             <SensorReading
               icon="💨"
               label="Smoke"
@@ -124,7 +120,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle })
             />
           </View>
           
-          <View className="w-[48%]">
+          <View style={styles.sensorCell}>
             <SensorReading
               icon="💧"
               label="Water"
@@ -157,3 +153,72 @@ export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle })
 };
 
 export default OutletCard;
+
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    overflow: 'hidden',
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+    backgroundColor: '#f8fafc',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  outletName: {
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  outletState: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  powerButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  powerOn: {
+    backgroundColor: '#10b981',
+    borderColor: '#059669',
+  },
+  powerOff: {
+    backgroundColor: '#e2e8f0',
+    borderColor: '#cbd5e1',
+  },
+  powerIcon: {
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  powerIconOn: {
+    color: '#ffffff',
+  },
+  powerIconOff: {
+    color: '#475569',
+  },
+  sensorWrap: {
+    padding: 16,
+  },
+  sensorRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  sensorCell: {
+    width: '48%',
+  },
+});

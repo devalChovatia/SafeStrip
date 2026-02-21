@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, ScrollView, Text } from 'react-native';
+import { View, ScrollView, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DashboardHeader } from './components/DashboardHeader';
@@ -145,16 +145,16 @@ export const DashboardScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-blue-50">
-      <View className="flex-1">
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.root}>
         <DashboardHeader />
 
-        <ScrollView 
-          className="flex-1 bg-white" 
+        <ScrollView
+          style={styles.scroll}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 24 }}
         >
-          <View className="px-4 py-6 gap-5">
+          <View style={styles.content}>
             <StatusCard
               status={systemStatus.status}
               variant={systemStatus.variant}
@@ -162,8 +162,8 @@ export const DashboardScreen: React.FC = () => {
               totalCount={outlets.length}
             />
 
-            <View className="gap-4">
-              <Text className="text-sm font-semibold text-gray-700 px-1">
+            <View style={styles.outletsWrap}>
+              <Text style={styles.sectionTitle}>
                 Power Outlets
               </Text>
               {outlets.map((outlet) => (
@@ -177,8 +177,8 @@ export const DashboardScreen: React.FC = () => {
           </View>
         </ScrollView>
 
-        <View className="px-4 py-4 bg-white/50 border-t border-gray-200">
-          <Text className="text-sm text-gray-600 text-center">
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
             {getTimeSinceUpdate()}
           </Text>
         </View>
@@ -188,3 +188,44 @@ export const DashboardScreen: React.FC = () => {
 };
 
 export default DashboardScreen;
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f1f5f9',
+  },
+  root: {
+    flex: 1,
+  },
+  scroll: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 16,
+  },
+  outletsWrap: {
+    gap: 12,
+  },
+  sectionTitle: {
+    paddingHorizontal: 2,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  footer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
+  },
+  footerText: {
+    textAlign: 'center',
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+});
