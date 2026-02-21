@@ -141,6 +141,7 @@ export default function Auth() {
 									className="mt-2 rounded-lg border-[#d1d5db] bg-white"
 								>
 									<InputField
+										className="text-[#111827]"
 										value={email}
 										onChangeText={setEmail}
 										placeholder="you@example.com"
@@ -165,6 +166,7 @@ export default function Auth() {
 									className="mt-2 rounded-lg border-[#d1d5db] bg-white"
 								>
 									<InputField
+										className="text-[#111827]"
 										value={password}
 										onChangeText={setPassword}
 										placeholder="••••••••"
@@ -195,6 +197,7 @@ export default function Auth() {
 										className="mt-2 rounded-lg border-[#d1d5db] bg-white"
 									>
 										<InputField
+											className="text-[#111827]"
 											value={confirmPassword}
 											onChangeText={setConfirmPassword}
 											placeholder="••••••••"
