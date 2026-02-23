@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from . import models 
 from .database import engine
-from .routers import null_router
+from .routers import null_router, sensor_log_router
 
 app = FastAPI()
 
@@ -19,3 +19,4 @@ models.Base.metadata.create_all(bind=engine)
 
 
 app.include_router(null_router.router)
+app.include_router(sensor_log_router.router)
