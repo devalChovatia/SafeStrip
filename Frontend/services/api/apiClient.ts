@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Base API configuration
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+// Base API configuration – strip trailing slash so paths like "/sensor-readings" don't become "//sensor-readings"
+const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
