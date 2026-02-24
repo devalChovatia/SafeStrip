@@ -1,7 +1,18 @@
 from .database import Base
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Float, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Float, DateTime, Enum, Numeric, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from datetime import datetime
+from enum import Enum as PyEnum
+import uuid
+
+
+class SensorType(str, PyEnum):
+    CURRENT = "current"
+    SMOKE = "smoke"
+    WATER = "water"
+    HUMIDITY = "humidity"
+    TEMP = "temp"
 
 
 class User(Base):
@@ -58,23 +69,24 @@ class Sensor(Base):
     
     sensor_id = Column(Integer, primary_key=True, index=True)
     outlet_id = Column(Integer, ForeignKey('outlets.outlet_id'), nullable=False)
-    sensor_type = Column(String, nullable=False)
+    sensor_type = Column(Enum(SensorType), nullable=False)
     unit = Column(String)
     installed_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     outlet = relationship('Outlet', back_populates='sensors')
-    readings = relationship('SensorReading', back_populates='sensor')
     alert_rules = relationship('AlertRule', back_populates='sensor_type_rel')
 
 
 class SensorReading(Base):
     __tablename__ = 'sensor_readings'
-    
-    reading_id = Column(Integer, primary_key=True, index=True)
-    sensor_id = Column(Integer, ForeignKey('sensors.sensor_id'), nullable=False)
-    ts = Column(DateTime, default=datetime.utcnow)
-    value = Column(Float, nullable=False)
-    sensor = relationship('Sensor', back_populates='readings')
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    device_id = Column(PG_UUID(as_uuid=True), nullable=False)
+    sensor_type = Column(Enum(SensorType), nullable=False)
+    value = Column(Numeric, nullable=False)
+    unit = Column(Text, nullable=True)
+    raw = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class AlertRule(Base):
@@ -82,7 +94,7 @@ class AlertRule(Base):
     
     rule_id = Column(Integer, primary_key=True, index=True)
     sensor_id = Column(Integer, ForeignKey('sensors.sensor_id'), nullable=True)
-    sensor_type = Column(String, nullable=False)
+    sensor_type = Column(Enum(SensorType), nullable=False)
     severity = Column(String, nullable=False)
     comparator = Column(String, nullable=False)
     threshold_value = Column(Float, nullable=False)
