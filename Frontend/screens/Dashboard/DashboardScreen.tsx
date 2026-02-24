@@ -18,6 +18,7 @@ import { OutletCard } from './components/OutletCard';
 import DeviceCard from './components/DeviceCard';
 import { Card } from '@/components/ui/card';
 import { Button, ButtonText } from '@/components/ui/button';
+import { fetchLatestWaterReading } from '@/services/api/sensorReadingsApi';
 import {
   Workspace,
   DeviceStrip,
@@ -47,6 +48,7 @@ interface DashboardScreenProps {
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onOpenSettings,
 }) => {
+  const DEMO_DEVICE_ID = 'b2c3bd18-1fd6-4a85-b7c5-20e830f86859';
   const insets = useSafeAreaInsets();
    const currentUserId = useAppSelector((s) => s.auth.user?.id);
 
@@ -139,30 +141,85 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Load workspaces for current user
+  // Demo: poll water sensor for outlet 1 on the demo device
+  useEffect(() => {
+    // selectedDevice is declared later; guard using id only here
+    if (view !== 'deviceDetail' || selectedDeviceId !== DEMO_DEVICE_ID) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const updateFromReading = async () => {
+      try {
+        const reading = await fetchLatestWaterReading(DEMO_DEVICE_ID);
+        if (!reading || cancelled) return;
+
+        const raw = reading.raw as { waterDetected?: boolean } | null | undefined;
+        const waterDetected =
+          raw && typeof raw.waterDetected === 'boolean'
+            ? raw.waterDetected
+            : Number(reading.value) > 0;
+
+        setOutlets((prev) =>
+          prev.map((outlet) =>
+            outlet.id === 1
+              ? {
+                  ...outlet,
+                  waterDetected,
+                }
+              : outlet
+          )
+        );
+      } catch {
+        // ignore polling errors in demo
+      }
+    };
+
+    // initial fetch
+    void updateFromReading();
+    const interval = setInterval(updateFromReading, 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [view, selectedDeviceId]);
+
+  // Load rooms (workspaces) and all their devices for the current user
   useEffect(() => {
     if (!currentUserId) return;
 
     const run = async () => {
       try {
         setLoading(true);
-        const data = await fetchWorkspaces(currentUserId);
-        setWorkspaces(data);
-        if (data.length > 0) {
-          const firstId = data[0].id;
-          setSelectedWorkspaceId(firstId);
-          const devs = await fetchDevicesForWorkspace(firstId);
-          setDevices(devs);
-        } else {
+
+        // 1) Load all rooms owned by this user
+        const ws = await fetchWorkspaces(currentUserId);
+        setWorkspaces(ws);
+
+        if (ws.length === 0) {
           setSelectedWorkspaceId(null);
           setDevices([]);
+          return;
         }
+
+        // 2) For each room, load its devices
+        const deviceLists = await Promise.all(
+          ws.map((w) => fetchDevicesForWorkspace(w.id))
+        );
+        const allDevices = deviceLists.flat();
+        setDevices(allDevices);
+
+        // 3) Default selection = first room
+        setSelectedWorkspaceId(ws[0].id);
       } catch (e) {
         setError('Failed to load workspaces');
       } finally {
         setLoading(false);
       }
     };
+
     void run();
   }, [currentUserId]);
 

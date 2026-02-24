@@ -6,7 +6,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -53,4 +53,44 @@ def create_sensor_reading(payload: SensorReadingCreate, db: Session = Depends(ge
     except Exception as e:
         logger.exception("Failed to create sensor reading")
         db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/latest")
+def get_latest_sensor_reading(
+    device_id: UUID = Query(..., description="Device UUID"),
+    sensor_type: SensorType = Query(SensorType.WATER),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the latest sensor_readings row for a device and sensor_type.
+    Used by the demo app to poll the water sensor.
+    """
+    try:
+        row = (
+            db.query(SensorReading)
+            .filter(
+                SensorReading.device_id == device_id,
+                SensorReading.sensor_type == sensor_type,
+            )
+            .order_by(SensorReading.created_at.desc())
+            .first()
+        )
+
+        if not row:
+            return None
+
+        return {
+            "id": str(row.id),
+            "device_id": str(row.device_id),
+            "sensor_type": row.sensor_type.value
+            if hasattr(row.sensor_type, "value")
+            else row.sensor_type,
+            "value": float(row.value),
+            "unit": row.unit,
+            "raw": row.raw,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+    except Exception as e:
+        logger.exception("Failed to fetch latest sensor reading")
         raise HTTPException(status_code=500, detail=str(e))
