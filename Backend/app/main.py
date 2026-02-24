@@ -5,9 +5,16 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from . import models 
 from .database import engine
-from .routers import null_router, sensor_log_router, sensor_readings_router
+from .routers import (
+    null_router,
+    sensor_log_router,
+    sensor_readings_router,
+    workspaces_router,
+    devices_router,
+)
 
 app = FastAPI()
 
@@ -28,3 +35,5 @@ if os.getenv("RUN_CREATE_TABLES", "").lower() in ("1", "true", "yes"):
 app.include_router(null_router.router)
 app.include_router(sensor_log_router.router)
 app.include_router(sensor_readings_router.router)
+app.include_router(workspaces_router.router)
+app.include_router(devices_router.router)
