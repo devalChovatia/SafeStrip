@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -19,8 +20,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-models.Base.metadata.create_all(bind=engine)
-
+# Skip on Render/Supabase: tables are managed in Supabase; set SKIP_CREATE_TABLES=1 in Render env
+if os.getenv("SKIP_CREATE_TABLES", "").lower() not in ("1", "true", "yes"):
+    models.Base.metadata.create_all(bind=engine)
 
 app.include_router(null_router.router)
 app.include_router(sensor_log_router.router)
