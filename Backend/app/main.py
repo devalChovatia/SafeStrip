@@ -20,8 +20,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Skip on Render/Supabase: tables are managed in Supabase; set SKIP_CREATE_TABLES=1 in Render env
-if os.getenv("SKIP_CREATE_TABLES", "").lower() not in ("1", "true", "yes"):
+# Only run create_all when explicitly requested (e.g. local dev with empty DB).
+# On Render + Supabase, leave unset so we use your existing tables and never run create_all.
+if os.getenv("RUN_CREATE_TABLES", "").lower() in ("1", "true", "yes"):
     models.Base.metadata.create_all(bind=engine)
 
 app.include_router(null_router.router)
