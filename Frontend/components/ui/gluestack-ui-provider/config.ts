@@ -3,18 +3,19 @@ import { vars } from 'nativewind';
 
 export const config = {
   light: vars({
-    '--color-primary-0': '179 179 179',
-    '--color-primary-50': '153 153 153',
-    '--color-primary-100': '128 128 128',
-    '--color-primary-200': '115 115 115',
-    '--color-primary-300': '102 102 102',
-    '--color-primary-400': '82 82 82',
-    '--color-primary-500': '51 51 51',
-    '--color-primary-600': '41 41 41',
-    '--color-primary-700': '31 31 31',
-    '--color-primary-800': '13 13 13',
-    '--color-primary-900': '10 10 10',
-    '--color-primary-950': '8 8 8',
+    // Primary (brand) – matches logo blue (#2563eb)
+    '--color-primary-0': '239 246 255',   // blue-50
+    '--color-primary-50': '219 234 254',  // blue-100
+    '--color-primary-100': '191 219 254', // blue-200
+    '--color-primary-200': '147 197 253', // blue-300
+    '--color-primary-300': '96 165 250',  // blue-400
+    '--color-primary-400': '59 130 246',  // blue-500
+    '--color-primary-500': '37 99 235',   // blue-600 (logo)
+    '--color-primary-600': '29 78 216',   // blue-700
+    '--color-primary-700': '30 64 175',   // blue-800
+    '--color-primary-800': '30 58 138',   // blue-900
+    '--color-primary-900': '23 37 84',    // blue-950
+    '--color-primary-950': '15 23 42',    // slate-900 (deep)
 
     /* Secondary  */
     '--color-secondary-0': '253 253 253',
@@ -155,18 +156,19 @@ export const config = {
     '--color-indicator-error': '185 28 28',
   }),
   dark: vars({
-    '--color-primary-0': '166 166 166',
-    '--color-primary-50': '175 175 175',
-    '--color-primary-100': '186 186 186',
-    '--color-primary-200': '197 197 197',
-    '--color-primary-300': '212 212 212',
-    '--color-primary-400': '221 221 221',
-    '--color-primary-500': '230 230 230',
-    '--color-primary-600': '240 240 240',
-    '--color-primary-700': '250 250 250',
-    '--color-primary-800': '253 253 253',
-    '--color-primary-900': '254 249 249',
-    '--color-primary-950': '253 252 252',
+    // Primary (brand) – same palette in dark mode
+    '--color-primary-0': '239 246 255',
+    '--color-primary-50': '219 234 254',
+    '--color-primary-100': '191 219 254',
+    '--color-primary-200': '147 197 253',
+    '--color-primary-300': '96 165 250',
+    '--color-primary-400': '59 130 246',
+    '--color-primary-500': '37 99 235',
+    '--color-primary-600': '29 78 216',
+    '--color-primary-700': '30 64 175',
+    '--color-primary-800': '30 58 138',
+    '--color-primary-900': '23 37 84',
+    '--color-primary-950': '15 23 42',
 
     /* Secondary  */
     '--color-secondary-0': '20 20 20',

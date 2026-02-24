@@ -114,7 +114,7 @@ def list_devices_for_workspace(workspace_id: UUID, db: Session = Depends(get_db)
         rows = db.execute(
             text(
                 """
-                SELECT id, workspace_id, device_name, device_label, status, last_seen_at, created_at
+                SELECT id, workspace_id, device_name, status, last_seen_at, created_at
                 FROM devices
                 WHERE workspace_id = :workspace_id
                 ORDER BY created_at DESC
@@ -128,7 +128,6 @@ def list_devices_for_workspace(workspace_id: UUID, db: Session = Depends(get_db)
                 "id": str(r["id"]),
                 "workspace_id": str(r["workspace_id"]),
                 "device_name": r["device_name"],
-                "device_label": r.get("device_label"),
                 "status": r.get("status"),
                 "last_seen_at": r["last_seen_at"].isoformat() if r.get("last_seen_at") else None,
                 "created_at": r["created_at"].isoformat() if r.get("created_at") else None,

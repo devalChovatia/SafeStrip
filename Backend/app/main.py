@@ -18,10 +18,20 @@ from .routers import (
 
 app = FastAPI()
 
-orig_host = ""  
+# CORS
+# In dev we allow localhost / Expo dev tools. In prod, tighten this.
+origins = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://localhost:8081",   # Metro bundler
+    "http://localhost:19006",  # Expo web
+    "http://localhost:19000",  # Expo dev app
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[orig_host],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

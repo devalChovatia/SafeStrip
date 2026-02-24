@@ -17,7 +17,6 @@ router = APIRouter(prefix="/api/devices", tags=["devices"])
 class DeviceCreate(BaseModel):
     workspace_id: UUID
     device_name: str = Field(..., min_length=1, max_length=160)
-    device_label: Optional[str] = Field(default=None, max_length=160)
 
 
 @router.get("")
@@ -30,7 +29,7 @@ def list_devices(
             rows = db.execute(
                 text(
                     """
-                    SELECT id, workspace_id, device_name, device_label, status, last_seen_at, created_at
+                    SELECT id, workspace_id, device_name, status, last_seen_at, created_at
                     FROM devices
                     WHERE workspace_id = :workspace_id
                     ORDER BY created_at DESC
@@ -42,7 +41,7 @@ def list_devices(
             rows = db.execute(
                 text(
                     """
-                    SELECT id, workspace_id, device_name, device_label, status, last_seen_at, created_at
+                    SELECT id, workspace_id, device_name, status, last_seen_at, created_at
                     FROM devices
                     ORDER BY created_at DESC
                     """
@@ -54,7 +53,6 @@ def list_devices(
                 "id": str(r["id"]),
                 "workspace_id": str(r["workspace_id"]),
                 "device_name": r["device_name"],
-                "device_label": r.get("device_label"),
                 "status": r.get("status"),
                 "last_seen_at": r["last_seen_at"].isoformat() if r.get("last_seen_at") else None,
                 "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
@@ -76,15 +74,14 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
         row = db.execute(
             text(
                 """
-                INSERT INTO devices (workspace_id, device_name, device_label)
-                VALUES (:workspace_id, :device_name, :device_label)
-                RETURNING id, workspace_id, device_name, device_label, status, last_seen_at, created_at
+                INSERT INTO devices (workspace_id, device_name)
+                VALUES (:workspace_id, :device_name)
+                RETURNING id, workspace_id, device_name, status, last_seen_at, created_at
                 """
             ),
             {
                 "workspace_id": payload.workspace_id,
                 "device_name": payload.device_name,
-                "device_label": payload.device_label,
             },
         ).mappings().first()
 
@@ -97,7 +94,6 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
             "id": str(row["id"]),
             "workspace_id": str(row["workspace_id"]),
             "device_name": row["device_name"],
-            "device_label": row.get("device_label"),
             "status": row.get("status"),
             "last_seen_at": row["last_seen_at"].isoformat() if row.get("last_seen_at") else None,
             "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
