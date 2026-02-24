@@ -7,6 +7,7 @@ import {
   TextInput,
   Pressable,
   ActivityIndicator,
+  Modal as RNModal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,15 +16,7 @@ import { DashboardHeader } from './components/DashboardHeader';
 import { StatusCard } from './components/StatusCard';
 import { OutletCard } from './components/OutletCard';
 import DeviceCard from './components/DeviceCard';
-import {
-  Modal,
-  ModalBackdrop,
-  ModalBody,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalCloseButton,
-} from '@/components/ui/modal';
+import { Card } from '@/components/ui/card';
 import { Button, ButtonText } from '@/components/ui/button';
 import {
   Workspace,
@@ -33,6 +26,7 @@ import {
   fetchDevicesForWorkspace,
   createDevice,
 } from '@/services/api/workspacesApi';
+import { useAppSelector } from '@/store';
 
 interface Outlet {
   id: number;
@@ -54,6 +48,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onOpenSettings,
 }) => {
   const insets = useSafeAreaInsets();
+   const currentUserId = useAppSelector((s) => s.auth.user?.id);
 
   // Workspace + device state
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -62,6 +57,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     null
   );
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [deviceModalWorkspaceId, setDeviceModalWorkspaceId] = useState<string | null>(null);
   const [view, setView] = useState<DashboardView>('devices');
 
   const [loading, setLoading] = useState(false);
@@ -72,7 +68,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [deviceModalOpen, setDeviceModalOpen] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
   const [deviceName, setDeviceName] = useState('');
-  const [deviceLabel, setDeviceLabel] = useState('');
 
   // Mock outlet data (per-device dashboard)
   const [lastUpdate, setLastUpdate] = useState(new Date());
@@ -144,18 +139,23 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Load workspaces on mount
+  // Load workspaces for current user
   useEffect(() => {
+    if (!currentUserId) return;
+
     const run = async () => {
       try {
         setLoading(true);
-        const data = await fetchWorkspaces();
+        const data = await fetchWorkspaces(currentUserId);
         setWorkspaces(data);
         if (data.length > 0) {
           const firstId = data[0].id;
           setSelectedWorkspaceId(firstId);
           const devs = await fetchDevicesForWorkspace(firstId);
           setDevices(devs);
+        } else {
+          setSelectedWorkspaceId(null);
+          setDevices([]);
         }
       } catch (e) {
         setError('Failed to load workspaces');
@@ -164,7 +164,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       }
     };
     void run();
-  }, []);
+  }, [currentUserId]);
 
   const selectedWorkspace = selectedWorkspaceId
     ? workspaces.find((w) => w.id === selectedWorkspaceId) ?? null
@@ -176,6 +176,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const selectedDevice = selectedDeviceId
     ? devices.find((d) => d.id === selectedDeviceId) ?? null
+    : null;
+
+  const deviceModalWorkspace = deviceModalWorkspaceId
+    ? workspaces.find((w) => w.id === deviceModalWorkspaceId) ?? null
     : null;
 
   // Device/status helpers (per-device dashboard)
@@ -237,9 +241,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   // Workspace + device creation
   const handleCreateWorkspace = async () => {
     if (!workspaceName.trim()) return;
+    if (!currentUserId) {
+      setError('Cannot create workspace: no user id');
+      return;
+    }
     try {
       setLoading(true);
-      const created = await createWorkspace({ name: workspaceName.trim() });
+      const created = await createWorkspace({
+        name: workspaceName.trim(),
+        created_by: currentUserId,
+      });
       setWorkspaces((prev) => [created, ...prev]);
       setSelectedWorkspaceId(created.id);
       setWorkspaceModalOpen(false);
@@ -252,19 +263,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   };
 
   const handleCreateDevice = async () => {
-    if (!selectedWorkspace) return;
+    if (!deviceModalWorkspace) return;
     if (!deviceName.trim()) return;
     try {
       setLoading(true);
       const created = await createDevice({
-        workspace_id: selectedWorkspace.id,
+        workspace_id: deviceModalWorkspace.id,
         device_name: deviceName.trim(),
-        device_label: deviceLabel.trim() || null,
       });
       setDevices((prev) => [created, ...prev]);
       setDeviceModalOpen(false);
       setDeviceName('');
-      setDeviceLabel('');
     } catch (e) {
       setError('Failed to create device');
     } finally {
@@ -274,6 +283,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const openDeviceDetail = (deviceId: string) => {
     setSelectedDeviceId(deviceId);
+    const dev = devices.find((d) => d.id === deviceId);
+    if (dev) {
+      setSelectedWorkspaceId(dev.workspace_id);
+    }
     setView('deviceDetail');
   };
 
@@ -294,14 +307,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <View className="px-4 pt-3 pb-2 bg-slate-50 border-b border-slate-200">
           <Pressable
             onPress={() => setView('devices')}
-            className="flex-row items-center gap-2"
+            className="self-start flex-row items-center rounded-full bg-slate-100 px-3 py-1.5 border border-slate-200 active:bg-slate-200"
+            hitSlop={8}
           >
-            <Ionicons name="chevron-back" size={18} color="#0f172a" />
-            <Text className="text-slate-700 text-sm font-medium">
+            <Ionicons name="chevron-back" size={16} color="#0f172a" />
+            <Text className="text-slate-700 text-xs font-semibold ml-1.5 uppercase tracking-wide">
               Back to devices
             </Text>
           </Pressable>
-          <Text className="text-slate-900 text-lg font-semibold mt-1">
+          <Text className="text-slate-900 text-lg font-semibold mt-3">
             {selectedDevice.device_name}
           </Text>
         </View>
@@ -353,13 +367,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         >
           <View className="bg-white rounded-2xl border border-dashed border-slate-300 p-5">
             <Text className="text-slate-900 text-base font-semibold mb-2">
-              Create your first workspace
+              Create your first room
             </Text>
             <Text className="text-slate-500 text-sm mb-4">
               Group your SafeStrip devices by room, like “Kitchen” or “Bedroom”.
             </Text>
             <Button onPress={() => setWorkspaceModalOpen(true)}>
-              <ButtonText>Create workspace</ButtonText>
+              <ButtonText>Create room</ButtonText>
             </Button>
           </View>
         </ScrollView>
@@ -373,61 +387,73 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         showsVerticalScrollIndicator={false}
       >
         <View className="mb-4 flex-row items-center justify-between">
-          <View>
-            <Text className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-              Workspace
-            </Text>
-            <Text className="text-slate-900 text-lg font-semibold mt-0.5">
-              {selectedWorkspace?.name ?? 'Select workspace'}
-            </Text>
-          </View>
+          <Text className="text-slate-900 text-lg font-semibold">
+            Rooms
+          </Text>
           <Button
             size="sm"
             onPress={() => setWorkspaceModalOpen(true)}
           >
-            <ButtonText>New workspace</ButtonText>
+            <ButtonText>New room</ButtonText>
           </Button>
         </View>
 
-        {selectedWorkspace && (
-          <View className="mb-3 flex-row items-center justify-between">
-            <Text className="text-slate-700 text-sm font-semibold">
-              Devices
-            </Text>
-            <Button
-              size="sm"
-              onPress={() => setDeviceModalOpen(true)}
-            >
-              <ButtonText>Add device</ButtonText>
-            </Button>
-          </View>
-        )}
+        {workspaces.map((ws) => {
+          const wsDevices = devices.filter((d) => d.workspace_id === ws.id);
+          return (
+            <Card key={ws.id} className="mb-4 p-4">
+              <View className="flex-row items-center justify-between mb-2">
+                <View className="flex-1 pr-2">
+                  <Text className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Room
+                  </Text>
+                  <Text className="text-slate-900 text-lg font-semibold mt-0.5">
+                    {ws.name}
+                  </Text>
+                </View>
+                <Button
+                  size="sm"
+                  onPress={() => {
+                    setDeviceModalWorkspaceId(ws.id);
+                    setDeviceModalOpen(true);
+                  }}
+                >
+                  <ButtonText>Add device</ButtonText>
+                </Button>
+              </View>
 
-        {selectedWorkspace && devicesForWorkspace.length === 0 && (
-          <View className="bg-white rounded-2xl border border-dashed border-slate-300 p-5 mb-3">
-            <Text className="text-slate-900 text-base font-semibold mb-2">
-              No devices yet
-            </Text>
-            <Text className="text-slate-500 text-sm mb-4">
-              Add your first SafeStrip device for this workspace.
-            </Text>
-            <Button onPress={() => setDeviceModalOpen(true)}>
-              <ButtonText>Add device</ButtonText>
-            </Button>
-          </View>
-        )}
-
-        {selectedWorkspace &&
-          devicesForWorkspace.map((d) => (
-            <DeviceCard
-              key={d.id}
-              name={d.device_name}
-              workspaceName={selectedWorkspace.name}
-              status={d.status}
-              lastSeenAt={d.last_seen_at ?? undefined}
-              onOpen={() => openDeviceDetail(d.id)}
-            />
-          ))}
+              {wsDevices.length === 0 ? (
+                <View className="mt-2 rounded-xl border border-dashed border-slate-300 px-3 py-3">
+                  <Text className="text-slate-600 text-sm mb-2">
+                    No devices in this workspace yet.
+                  </Text>
+                  <Button
+                    size="sm"
+                    onPress={() => {
+                      setDeviceModalWorkspaceId(ws.id);
+                      setDeviceModalOpen(true);
+                    }}
+                  >
+                    <ButtonText>Add first device</ButtonText>
+                  </Button>
+                </View>
+              ) : (
+                <View className="mt-2">
+                  {wsDevices.map((d) => (
+                    <DeviceCard
+                      key={d.id}
+                      name={d.device_name}
+                      workspaceName={ws.name}
+                      status={d.status}
+                      lastSeenAt={d.last_seen_at ?? undefined}
+                      onOpen={() => openDeviceDetail(d.id)}
+                    />
+                  ))}
+                </View>
+              )}
+            </Card>
+          );
+        })}
       </ScrollView>
     );
   };
@@ -445,19 +471,30 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </View>
         )}
 
-        {/* Workspace modal */}
-        <Modal isOpen={workspaceModalOpen} onClose={() => setWorkspaceModalOpen(false)}>
-          <ModalBackdrop />
-          <ModalContent size="md">
-            <ModalHeader>
-              <Text className="text-slate-900 text-base font-semibold">
-                New workspace
-              </Text>
-              <ModalCloseButton onPress={() => setWorkspaceModalOpen(false)} />
-            </ModalHeader>
-            <ModalBody>
+        {/* Workspace modal (React Native Modal) */}
+        <RNModal
+          visible={workspaceModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setWorkspaceModalOpen(false)}
+        >
+          <View className="flex-1 bg-black/40 items-center justify-center px-6">
+            <View className="w-full rounded-2xl bg-white border border-slate-200 p-5">
+              <View className="flex-row items-center justify-between mb-4">
+                <Text className="text-slate-900 text-base font-semibold">
+                  New room
+                </Text>
+                <Pressable
+                  onPress={() => setWorkspaceModalOpen(false)}
+                  hitSlop={8}
+                  className="p-1"
+                >
+                  <Ionicons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+
               <Text className="text-slate-700 text-sm mb-2">
-                Workspace name
+                Room name
               </Text>
               <View className="border border-slate-300 rounded-lg px-3 py-2 bg-white">
                 <TextInput
@@ -468,39 +505,51 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   className="text-slate-900 text-base"
                 />
               </View>
-            </ModalBody>
-            <ModalFooter>
-              <Button
-                variant="outline"
-                action="primary"
-                size="sm"
-                onPress={() => setWorkspaceModalOpen(false)}
-              >
-                <ButtonText>Cancel</ButtonText>
-              </Button>
-              <Button size="sm" onPress={handleCreateWorkspace}>
-                <ButtonText>Create</ButtonText>
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
 
-        {/* Device modal */}
-        <Modal isOpen={deviceModalOpen} onClose={() => setDeviceModalOpen(false)}>
-          <ModalBackdrop />
-          <ModalContent size="md">
-            <ModalHeader>
-              <Text className="text-slate-900 text-base font-semibold">
-                New device
-              </Text>
-              <ModalCloseButton onPress={() => setDeviceModalOpen(false)} />
-            </ModalHeader>
-            <ModalBody>
+              <View className="flex-row justify-end gap-2 mt-5">
+                <Button
+                  variant="outline"
+                  action="primary"
+                  size="sm"
+                  onPress={() => setWorkspaceModalOpen(false)}
+                >
+                  <ButtonText>Cancel</ButtonText>
+                </Button>
+                <Button size="sm" onPress={handleCreateWorkspace}>
+                  <ButtonText>Create</ButtonText>
+                </Button>
+              </View>
+            </View>
+          </View>
+        </RNModal>
+
+        {/* Device modal (React Native Modal) */}
+        <RNModal
+          visible={deviceModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setDeviceModalOpen(false)}
+        >
+          <View className="flex-1 bg-black/40 items-center justify-center px-6">
+            <View className="w-full rounded-2xl bg-white border border-slate-200 p-5">
+              <View className="flex-row items-center justify-between mb-4">
+                <Text className="text-slate-900 text-base font-semibold">
+                  New device
+                </Text>
+                <Pressable
+                  onPress={() => setDeviceModalOpen(false)}
+                  hitSlop={8}
+                  className="p-1"
+                >
+                  <Ionicons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+
               <Text className="text-slate-500 text-xs mb-1">
-                Workspace
+                Room
               </Text>
               <Text className="text-slate-900 text-sm font-semibold mb-3">
-                {selectedWorkspace?.name ?? 'None selected'}
+                {deviceModalWorkspace?.name ?? 'None selected'}
               </Text>
 
               <Text className="text-slate-700 text-sm mb-2">
@@ -516,34 +565,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 />
               </View>
 
-              <Text className="text-slate-700 text-sm mb-2">
-                Label (optional)
-              </Text>
-              <View className="border border-slate-300 rounded-lg px-3 py-2 bg-white">
-                <TextInput
-                  placeholder="Short label"
-                  placeholderTextColor="#9ca3af"
-                  value={deviceLabel}
-                  onChangeText={setDeviceLabel}
-                  className="text-slate-900 text-base"
-                />
+              <View className="flex-row justify-end gap-2 mt-5">
+                <Button
+                  variant="outline"
+                  action="primary"
+                  size="sm"
+                  onPress={() => setDeviceModalOpen(false)}
+                >
+                  <ButtonText>Cancel</ButtonText>
+                </Button>
+                <Button
+                  size="sm"
+                  onPress={handleCreateDevice}
+                  disabled={!deviceModalWorkspace}
+                >
+                  <ButtonText>Create</ButtonText>
+                </Button>
               </View>
-            </ModalBody>
-            <ModalFooter>
-              <Button
-                variant="outline"
-                action="primary"
-                size="sm"
-                onPress={() => setDeviceModalOpen(false)}
-              >
-                <ButtonText>Cancel</ButtonText>
-              </Button>
-              <Button size="sm" onPress={handleCreateDevice} disabled={!selectedWorkspace}>
-                <ButtonText>Create</ButtonText>
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
+            </View>
+          </View>
+        </RNModal>
 
         {error && (
           <View className="absolute bottom-4 left-4 right-4 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
