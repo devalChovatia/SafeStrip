@@ -1,24 +1,15 @@
 import React, { useState } from "react";
-import {
-	View,
-	Text,
-	KeyboardAvoidingView,
-	Platform,
-	ScrollView,
-} from "react-native";
+import { View, Text, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert, AlertText } from "@/components/ui/alert";
-import {
-	FormControl,
-	FormControlLabel,
-	FormControlLabelText,
-} from "@/components/ui/form-control";
+import { FormControl, FormControlLabel, FormControlLabelText } from "@/components/ui/form-control";
 import { Input, InputField, InputSlot, InputIcon } from "@/components/ui/input";
 import { EyeIcon, EyeOffIcon } from "@/components/ui/icon";
 import { Button, ButtonText, ButtonSpinner } from "@/components/ui/button";
 import { Link, LinkText } from "@/components/ui/link";
 import { supabase } from "@/lib/supabase";
+import { upsertProfile } from "@/services/api/profilesApi";
 
 type Mode = "signin" | "signup";
 
@@ -42,6 +33,7 @@ function Logo() {
 export default function Auth() {
 	const insets = useSafeAreaInsets();
 	const [mode, setMode] = useState<Mode>("signup");
+	const [displayName, setDisplayName] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
@@ -72,6 +64,10 @@ export default function Auth() {
 	}
 
 	async function signUpWithEmail() {
+		if (!displayName.trim()) {
+			setError("Please enter a display name.");
+			return;
+		}
 		if (!email.trim() || !password) {
 			setError("Please enter email and password.");
 			return;
@@ -86,15 +82,40 @@ export default function Auth() {
 		}
 		setError(null);
 		setLoading(true);
-		const {
-			data: { session },
-			error: err,
-		} = await supabase.auth.signUp({
-			email: email.trim(),
-			password,
-		});
-		if (err) setError(err.message);
-		setLoading(false);
+		try {
+			const { data, error: err } = await supabase.auth.signUp({
+				email: email.trim(),
+				password,
+			});
+
+			if (err) {
+				setError(err.message);
+				return;
+			}
+
+			const userId = data.user?.id;
+			const accessToken = data.session?.access_token;
+			// Debug: Supabase often returns null session when "Confirm email" is enabled
+			if (__DEV__) {
+				console.log("[Auth] signUp result:", {
+					userId: !!userId,
+					hasSession: !!data.session,
+					hasAccessToken: !!accessToken,
+					willCallProfileApi: !!(userId && displayName.trim() && accessToken),
+				});
+			}
+			if (userId && displayName.trim() && accessToken) {
+				try {
+					await upsertProfile(accessToken, displayName.trim());
+				} catch (profileErr: unknown) {
+					const err = profileErr as { response?: { data?: { detail?: string } }; message?: string };
+					const msg = err?.response?.data?.detail ?? err?.message ?? "Failed to save profile";
+					setError(msg);
+				}
+			}
+		} finally {
+			setLoading(false);
+		}
 	}
 
 	function handleSubmit() {
@@ -129,17 +150,34 @@ export default function Auth() {
 
 						{/* Form */}
 						<View className="mt-8">
+							{isSignUp && (
+								<FormControl className="mb-5">
+									<FormControlLabel>
+										<FormControlLabelText className="text-[14px] font-medium text-[#374151]">
+											Display name
+										</FormControlLabelText>
+									</FormControlLabel>
+									<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
+										<InputField
+											className="text-[#111827]"
+											value={displayName}
+											onChangeText={setDisplayName}
+											placeholder="e.g. John Doe"
+											placeholderTextColor="#9ca3af"
+											autoCapitalize="words"
+											editable={!loading}
+										/>
+									</Input>
+								</FormControl>
+							)}
+
 							<FormControl className="mb-5">
 								<FormControlLabel>
 									<FormControlLabelText className="text-[14px] font-medium text-[#374151]">
 										Email Address
 									</FormControlLabelText>
 								</FormControlLabel>
-								<Input
-									variant="outline"
-									size="md"
-									className="mt-2 rounded-lg border-[#d1d5db] bg-white"
-								>
+								<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
 									<InputField
 										className="text-[#111827]"
 										value={email}
@@ -160,11 +198,7 @@ export default function Auth() {
 										Password
 									</FormControlLabelText>
 								</FormControlLabel>
-								<Input
-									variant="outline"
-									size="md"
-									className="mt-2 rounded-lg border-[#d1d5db] bg-white"
-								>
+								<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
 									<InputField
 										className="text-[#111827]"
 										value={password}
@@ -177,9 +211,7 @@ export default function Auth() {
 										editable={!loading}
 									/>
 									<InputSlot onPress={() => setShowPassword((p) => !p)} className="pr-3">
-										<InputIcon className="text-[#6b7280]">
-											{showPassword ? <EyeOffIcon /> : <EyeIcon />}
-										</InputIcon>
+										<InputIcon className="text-[#6b7280]">{showPassword ? <EyeOffIcon /> : <EyeIcon />}</InputIcon>
 									</InputSlot>
 								</Input>
 							</FormControl>
@@ -191,11 +223,7 @@ export default function Auth() {
 											Confirm Password
 										</FormControlLabelText>
 									</FormControlLabel>
-									<Input
-										variant="outline"
-										size="md"
-										className="mt-2 rounded-lg border-[#d1d5db] bg-white"
-									>
+									<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
 										<InputField
 											className="text-[#111827]"
 											value={confirmPassword}
@@ -224,11 +252,7 @@ export default function Auth() {
 								isDisabled={loading}
 								className="min-h-[52px] rounded-lg bg-[#2563eb]"
 							>
-								{loading ? (
-									<ButtonSpinner />
-								) : (
-									<ButtonText>{isSignUp ? "Create Account" : "Sign In"}</ButtonText>
-								)}
+								{loading ? <ButtonSpinner /> : <ButtonText>{isSignUp ? "Create Account" : "Sign In"}</ButtonText>}
 							</Button>
 						</View>
 
