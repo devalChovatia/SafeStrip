@@ -7,33 +7,49 @@ const char* backendBaseUrl = "https://safestrip.onrender.com";
 // Replace with your device UUID from Supabase
 const char* deviceId = "69b69aa2-9177-438a-bab7-cb4f5da4a82e";
 
-const int sensorPin = 34;
+const int waterPin = 34;
+const int gasPin = 32;
 const int waterThreshold = 3000;  // analog below this = water detected (adjust as needed)
+const int gasThreshold = 800;
 
 void setup() {
   Serial.begin(115200);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
+  // WiFi.begin(ssid, password);
+  // Serial.print("Connecting to WiFi");
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   delay(500);
+  //   Serial.print(".");
+  // }
   Serial.println("\nConnected!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
+  // Serial.print("IP Address: ");
+  // Serial.println(WiFi.localIP());
 }
 
 void loop() {
-  int value = analogRead(sensorPin);
+  // -------- WATER SENSOR --------
+  int value = analogRead(waterPin);
   bool waterDetected = (value < waterThreshold);
-
-  Serial.print("Analog value: ");
+  Serial.print("Water Analog value: ");
   Serial.println(value);
   if (waterDetected) {
     Serial.println("Water detected");
   } else {
     Serial.println("Dry");
   }
+
+   // -------- GAS SENSOR --------
+  int gasValue = analogRead(gasPin);
+  bool gasDetected = (gasValue > gasThreshold);
+
+  Serial.print("Gas analog value: ");
+  Serial.println(gasValue);
+  if (gasDetected) {
+    Serial.println("Gas detected");
+  } else {
+    Serial.println("No gas Detected");
+  }
+
+  Serial.println("-----------------------------");
 
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
@@ -54,7 +70,27 @@ void loop() {
     Serial.print("POST /sensor-readings (water) -> ");
     Serial.println(httpCode);
     http.end();
+
+    // GAS JSON: TODO
+    // HTTPClient httpGas;
+
+    // String gasJson = String("{") +
+    //   String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + "," +
+    //   String(q) + "sensor_type" + String(q) + ":" + String(q) + "gas" + String(q) + "," +
+    //   String(q) + "value" + String(q) + ":" + String(gasValue) + "," +
+    //   String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + "}";
+
+    // httpGas.begin(String(backendBaseUrl) + "/sensor-readings");
+    // httpGas.addHeader("Content-Type", "application/json");
+
+    // int gasCode = httpGas.POST(gasJson);
+
+    // Serial.print("POST gas -> ");
+    // Serial.println(gasCode);
+
+    // httpGas.end();
   }
+  
 
   delay(2000);
 }
