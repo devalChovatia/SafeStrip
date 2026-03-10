@@ -1,11 +1,12 @@
-import React from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useEffect, useState } from 'react';
+import { View, Text, ScrollView, Pressable, TextInput, Modal } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppDispatch } from '@/store';
+import { useAppDispatch, useAppSelector } from '@/store';
 import { clearAuth } from '@/store/slices/authSlice';
 import { supabase } from '@/lib/supabase';
-import { Button, ButtonText } from '@/components/ui/button';
+import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
+import { fetchProfile, upsertProfile, type Profile } from '@/services/api/profilesApi';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -14,6 +15,43 @@ interface SettingsScreenProps {
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack }) => {
   const dispatch = useAppDispatch();
   const insets = useSafeAreaInsets();
+  const user = useAppSelector((state) => state.auth.user);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [displayNameModalOpen, setDisplayNameModalOpen] = useState(false);
+  const [displayNameInput, setDisplayNameInput] = useState('');
+  const [displayNameSaving, setDisplayNameSaving] = useState(false);
+
+  const hasDisplayName = Boolean(profile?.display_name?.trim());
+  const displayLabel =
+    profile?.display_name?.trim() ??
+    user?.user_metadata?.full_name ??
+    user?.user_metadata?.name ??
+    null;
+
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchProfile(user.id).then(setProfile).catch(() => setProfile(null));
+  }, [user?.id]);
+
+  async function saveDisplayName() {
+    if (!user?.id || !displayNameInput.trim()) return;
+    setDisplayNameSaving(true);
+    try {
+      const updated = await upsertProfile(user.id, displayNameInput.trim());
+      setProfile(updated);
+      setDisplayNameModalOpen(false);
+      setDisplayNameInput('');
+    } catch {
+      // Could add error state
+    } finally {
+      setDisplayNameSaving(false);
+    }
+  }
+
+  function openDisplayNameModal() {
+    setDisplayNameInput(profile?.display_name?.trim() ?? '');
+    setDisplayNameModalOpen(true);
+  }
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -46,6 +84,78 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack }) => {
           contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
           showsVerticalScrollIndicator={false}
         >
+        {/* Profile */}
+        <View className="mb-6">
+          <Text className="text-slate-500 text-sm font-semibold uppercase tracking-wider mb-3 px-1">
+            Profile
+          </Text>
+          <View className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <View className="p-4 flex-row items-center gap-4">
+              <View className="h-14 w-14 rounded-full bg-slate-300 items-center justify-center">
+                <Ionicons name="person" size={28} color="#64748b" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-slate-800 font-semibold text-base">
+                  {displayLabel ?? 'User'}
+                </Text>
+                <Text className="text-slate-500 text-sm mt-0.5" numberOfLines={1}>
+                  {user?.email ?? '—'}
+                </Text>
+              </View>
+              <Pressable
+                onPress={openDisplayNameModal}
+                className="py-2 px-3 rounded-lg active:bg-slate-100"
+              >
+                <Text className="text-[#2563eb] font-semibold text-sm">
+                  {hasDisplayName ? 'Edit' : 'Set name'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <Modal
+            visible={displayNameModalOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setDisplayNameModalOpen(false)}
+          >
+            <View className="flex-1 bg-black/40 items-center justify-center px-6">
+              <View className="w-full rounded-2xl bg-white border border-slate-200 p-5">
+                <Text className="text-slate-900 text-base font-semibold mb-2">
+                  {hasDisplayName ? 'Edit display name' : 'Set display name'}
+                </Text>
+                <TextInput
+                  placeholder="Display name"
+                  placeholderTextColor="#9ca3af"
+                  value={displayNameInput}
+                  onChangeText={setDisplayNameInput}
+                  className="border border-slate-300 rounded-lg px-3 py-3 text-slate-900 text-base mb-4"
+                />
+                <View className="flex-row justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onPress={() => setDisplayNameModalOpen(false)}
+                  >
+                    <ButtonText>Cancel</ButtonText>
+                  </Button>
+                  <Button
+                    size="sm"
+                    onPress={saveDisplayName}
+                    disabled={!displayNameInput.trim() || displayNameSaving}
+                  >
+                    {displayNameSaving ? (
+                      <ButtonSpinner />
+                    ) : (
+                      <ButtonText>Save</ButtonText>
+                    )}
+                  </Button>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        </View>
+
         <View className="mb-6">
           <Text className="text-slate-500 text-sm font-semibold uppercase tracking-wider mb-3 px-1">
             Account

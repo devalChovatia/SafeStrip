@@ -1,24 +1,15 @@
-import React, { useState } from "react";
-import {
-	View,
-	Text,
-	KeyboardAvoidingView,
-	Platform,
-	ScrollView,
-} from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert, AlertText } from "@/components/ui/alert";
-import {
-	FormControl,
-	FormControlLabel,
-	FormControlLabelText,
-} from "@/components/ui/form-control";
+import { FormControl, FormControlLabel, FormControlLabelText } from "@/components/ui/form-control";
 import { Input, InputField, InputSlot, InputIcon } from "@/components/ui/input";
 import { EyeIcon, EyeOffIcon } from "@/components/ui/icon";
 import { Button, ButtonText, ButtonSpinner } from "@/components/ui/button";
 import { Link, LinkText } from "@/components/ui/link";
 import { supabase } from "@/lib/supabase";
+import { upsertProfile } from "@/services/api/profilesApi";
 
 type Mode = "signin" | "signup";
 
@@ -41,7 +32,8 @@ function Logo() {
 
 export default function Auth() {
 	const insets = useSafeAreaInsets();
-	const [mode, setMode] = useState<Mode>("signup");
+	const [mode, setMode] = useState<Mode>("signin");
+	const [displayName, setDisplayName] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
@@ -51,6 +43,12 @@ export default function Auth() {
 	const [error, setError] = useState<string | null>(null);
 
 	const isSignUp = mode === "signup";
+
+	// If user got here after signing out, default to sign-in.
+	// (Also keeps the initial app open experience on sign-in.)
+	useEffect(() => {
+		setMode("signin");
+	}, []);
 
 	function clearError() {
 		setError(null);
@@ -76,6 +74,10 @@ export default function Auth() {
 			setError("Please enter email and password.");
 			return;
 		}
+		if (isSignUp && !displayName.trim()) {
+			setError("Please enter a display name.");
+			return;
+		}
 		if (password.length < 6) {
 			setError("Password must be at least 6 characters.");
 			return;
@@ -87,13 +89,24 @@ export default function Auth() {
 		setError(null);
 		setLoading(true);
 		const {
-			data: { session },
+			data: { user, session },
 			error: err,
 		} = await supabase.auth.signUp({
 			email: email.trim(),
 			password,
 		});
-		if (err) setError(err.message);
+		if (err) {
+			setError(err.message);
+			setLoading(false);
+			return;
+		}
+		if (user && displayName.trim()) {
+			try {
+				await upsertProfile(user.id, displayName.trim());
+			} catch {
+				setError("Account created but failed to save display name.");
+			}
+		}
 		setLoading(false);
 	}
 
@@ -129,17 +142,35 @@ export default function Auth() {
 
 						{/* Form */}
 						<View className="mt-8">
+							{isSignUp && (
+								<FormControl className="mb-5">
+									<FormControlLabel>
+										<FormControlLabelText className="text-[14px] font-medium text-[#374151]">
+											Display Name
+										</FormControlLabelText>
+									</FormControlLabel>
+									<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
+										<InputField
+											className="text-[#111827]"
+											value={displayName}
+											onChangeText={setDisplayName}
+											placeholder="How others see you"
+											placeholderTextColor="#9ca3af"
+											autoCapitalize="words"
+											autoComplete="name"
+											editable={!loading}
+										/>
+									</Input>
+								</FormControl>
+							)}
+
 							<FormControl className="mb-5">
 								<FormControlLabel>
 									<FormControlLabelText className="text-[14px] font-medium text-[#374151]">
 										Email Address
 									</FormControlLabelText>
 								</FormControlLabel>
-								<Input
-									variant="outline"
-									size="md"
-									className="mt-2 rounded-lg border-[#d1d5db] bg-white"
-								>
+								<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
 									<InputField
 										className="text-[#111827]"
 										value={email}
@@ -160,11 +191,7 @@ export default function Auth() {
 										Password
 									</FormControlLabelText>
 								</FormControlLabel>
-								<Input
-									variant="outline"
-									size="md"
-									className="mt-2 rounded-lg border-[#d1d5db] bg-white"
-								>
+								<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
 									<InputField
 										className="text-[#111827]"
 										value={password}
@@ -177,9 +204,7 @@ export default function Auth() {
 										editable={!loading}
 									/>
 									<InputSlot onPress={() => setShowPassword((p) => !p)} className="pr-3">
-										<InputIcon className="text-[#6b7280]">
-											{showPassword ? <EyeOffIcon /> : <EyeIcon />}
-										</InputIcon>
+										<InputIcon className="text-[#6b7280]">{showPassword ? <EyeOffIcon /> : <EyeIcon />}</InputIcon>
 									</InputSlot>
 								</Input>
 							</FormControl>
@@ -191,11 +216,7 @@ export default function Auth() {
 											Confirm Password
 										</FormControlLabelText>
 									</FormControlLabel>
-									<Input
-										variant="outline"
-										size="md"
-										className="mt-2 rounded-lg border-[#d1d5db] bg-white"
-									>
+									<Input variant="outline" size="md" className="mt-2 rounded-lg border-[#d1d5db] bg-white">
 										<InputField
 											className="text-[#111827]"
 											value={confirmPassword}
@@ -224,11 +245,7 @@ export default function Auth() {
 								isDisabled={loading}
 								className="min-h-[52px] rounded-lg bg-[#2563eb]"
 							>
-								{loading ? (
-									<ButtonSpinner />
-								) : (
-									<ButtonText>{isSignUp ? "Create Account" : "Sign In"}</ButtonText>
-								)}
+								{loading ? <ButtonSpinner /> : <ButtonText>{isSignUp ? "Create Account" : "Sign In"}</ButtonText>}
 							</Button>
 						</View>
 

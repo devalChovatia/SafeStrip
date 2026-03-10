@@ -14,6 +14,7 @@ interface Outlet {
 interface OutletCardProps {
   outlet: Outlet;
   onPowerToggle: () => void;
+  powerDisabled?: boolean;
 }
 
 interface SensorReadingProps {
@@ -62,7 +63,7 @@ const SensorReading: React.FC<SensorReadingProps> = ({
   );
 };
 
-export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle }) => {
+export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle, powerDisabled = false }) => {
   const hasRisk = outlet.waterDetected || outlet.smokeDetected;
   const hasWarning = outlet.temperature > 40 || outlet.current > 8;
 
@@ -77,9 +78,14 @@ export const OutletCard: React.FC<OutletCardProps> = ({ outlet, onPowerToggle })
           </Text>
         </View>
         <TouchableOpacity
-          onPress={onPowerToggle}
-          style={[styles.powerButton, outlet.powerOn ? styles.powerOn : styles.powerOff]}
-          activeOpacity={0.7}
+          onPress={powerDisabled ? undefined : onPowerToggle}
+          disabled={powerDisabled}
+          style={[
+            styles.powerButton,
+            outlet.powerOn ? styles.powerOn : styles.powerOff,
+            powerDisabled && styles.powerDisabled,
+          ]}
+          activeOpacity={powerDisabled ? 1 : 0.7}
         >
           <Text style={[styles.powerIcon, outlet.powerOn ? styles.powerIconOn : styles.powerIconOff]}>
             ⏻
@@ -199,6 +205,9 @@ const styles = StyleSheet.create({
   powerOff: {
     backgroundColor: '#e2e8f0',
     borderColor: '#cbd5e1',
+  },
+  powerDisabled: {
+    opacity: 0.6,
   },
   powerIcon: {
     fontSize: 22,
