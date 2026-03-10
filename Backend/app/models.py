@@ -1,7 +1,6 @@
 from .database import Base
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Float, DateTime, Enum, Numeric, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from datetime import datetime
 from enum import Enum as PyEnum
 import uuid
@@ -21,6 +20,7 @@ class User(Base):
     user_id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     locations = relationship('Location', back_populates='user')
     safety_checks = relationship('SafetyCheck', back_populates='user')
@@ -80,13 +80,13 @@ class Sensor(Base):
 class SensorReading(Base):
     __tablename__ = 'sensor_readings'
 
-    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    device_id = Column(PG_UUID(as_uuid=True), nullable=False)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String, nullable=False)
     sensor_type = Column(Enum(SensorType), nullable=False)
     value = Column(Numeric, nullable=False)
     unit = Column(Text, nullable=True)
-    raw = Column(JSONB, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    raw = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class AlertRule(Base):
