@@ -14,6 +14,7 @@ from .routers import (
     sensor_readings_router,
     workspaces_router,
     devices_router,
+    auth_router,
 )
 
 app = FastAPI()
@@ -42,6 +43,7 @@ app.add_middleware(
 if os.getenv("RUN_CREATE_TABLES", "").lower() in ("1", "true", "yes"):
     models.Base.metadata.create_all(bind=engine)
 
+app.include_router(auth_router.router)
 app.include_router(null_router.router)
 app.include_router(sensor_log_router.router)
 app.include_router(sensor_readings_router.router)
