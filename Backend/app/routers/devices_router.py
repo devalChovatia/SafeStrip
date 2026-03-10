@@ -2,12 +2,13 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..permissions import require_role
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,11 @@ class DeviceCreate(BaseModel):
 @router.get("")
 def list_devices(
     workspace_id: Optional[UUID] = Query(default=None),
+    x_user_id: Optional[UUID] = Header(None, alias="X-User-Id"),
     db: Session = Depends(get_db),
 ):
+    if workspace_id and x_user_id:
+        require_role(db, workspace_id, x_user_id, "VIEWER")
     try:
         if workspace_id:
             rows = db.execute(
@@ -65,11 +69,16 @@ def list_devices(
 
 
 @router.post("", status_code=201)
-def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
+def create_device(
+    payload: DeviceCreate,
+    x_user_id: Optional[UUID] = Header(None, alias="X-User-Id"),
+    db: Session = Depends(get_db),
+):
     """
     Creates a device (power strip) under a workspace.
-    `created_at` defaults to now() in the DB.
+    Requires OWNER or ADMIN in the workspace.
     """
+    require_role(db, payload.workspace_id, x_user_id, "ADMIN")
     try:
         row = db.execute(
             text(

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { store } from '@/store';
 
 // Base API configuration – strip trailing slash so paths like "/sensor-readings" don't become "//sensor-readings"
 // Supports separate dev/prod URLs:
@@ -22,14 +23,13 @@ export const apiClient = axios.create({
   },
 });
 
-// Request interceptor for adding auth token
+// Request interceptor: add X-User-Id for workspace permission checks
 apiClient.interceptors.request.use(
   async (config) => {
-    // TODO: Add auth token from secure storage
-    // const token = await SecureStore.getItemAsync('auth_token');
-    // if (token) {
-    //   config.headers.Authorization = `Bearer ${token}`;
-    // }
+    const userId = store.getState().auth.user?.id;
+    if (userId) {
+      config.headers['X-User-Id'] = userId;
+    }
     return config;
   },
   (error) => {
