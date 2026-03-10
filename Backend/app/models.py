@@ -8,11 +8,18 @@ import uuid
 
 
 class SensorType(str, PyEnum):
-    CURRENT = "current"
-    SMOKE = "smoke"
-    WATER = "water"
-    HUMIDITY = "humidity"
-    TEMP = "temp"
+    CURRENT = "CURRENT"
+    SMOKE = "SMOKE"
+    WATER = "WATER"
+    HUMIDITY = "HUMIDITY"
+    TEMP = "TEMP"
+
+
+class MemberRole(str, PyEnum):
+    OWNER = "OWNER"
+    ADMIN = "ADMIN"
+    MEMBER = "MEMBER"
+    VIEWER = "VIEWER"
 
 
 class User(Base):
@@ -143,3 +150,65 @@ class SafetyCheckItem(Base):
     reason = Column(String)
     check = relationship('SafetyCheck', back_populates='check_items')
     outlet = relationship('Outlet', back_populates='safety_check_items')
+
+
+# New ORM models for current workspace/room features
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    # Supabase auth user id; FK lives in Supabase auth schema so we keep it as plain UUID here
+    created_by = Column(PG_UUID(as_uuid=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    members = relationship(
+        "WorkspaceMember",
+        backref="workspace",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    devices = relationship(
+        "WorkspaceDevice",
+        backref="workspace",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+
+    workspace_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(PG_UUID(as_uuid=True), primary_key=True)
+    role = Column(Enum(MemberRole, name="member_role_enum"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Profile(Base):
+    __tablename__ = "profiles"
+
+    user_id = Column(PG_UUID(as_uuid=True), primary_key=True)
+    display_name = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class WorkspaceDevice(Base):
+    __tablename__ = "devices"
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    device_name = Column(String, nullable=False)
+    status = Column(String, nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

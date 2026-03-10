@@ -5,8 +5,9 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from . import models
 
 ROLE_LEVEL = {"OWNER": 4, "ADMIN": 3, "MEMBER": 2, "VIEWER": 1}
 
@@ -16,23 +17,24 @@ def get_member_role(db: Session, workspace_id: UUID, user_id: UUID) -> Optional[
     Returns the user's role in the workspace, or None if not a member.
     Treats workspace.created_by as OWNER when no membership row exists.
     """
-    row = db.execute(
-        text(
-            """
-            SELECT wm.role
-            FROM workspace_members wm
-            WHERE wm.workspace_id = :workspace_id AND wm.user_id = :user_id
-            """
-        ),
-        {"workspace_id": workspace_id, "user_id": user_id},
-    ).mappings().first()
-    if row:
-        return row["role"]
-    creator_row = db.execute(
-        text("SELECT created_by FROM workspaces WHERE id = :workspace_id"),
-        {"workspace_id": workspace_id},
-    ).mappings().first()
-    if creator_row and creator_row["created_by"] == user_id:
+    member = (
+        db.query(models.WorkspaceMember)
+        .filter(
+            models.WorkspaceMember.workspace_id == workspace_id,
+            models.WorkspaceMember.user_id == user_id,
+        )
+        .one_or_none()
+    )
+    if member:
+        # member.role is a MemberRole enum; convert to string for ROLE_LEVEL
+        return member.role.value if hasattr(member.role, "value") else member.role
+
+    workspace = (
+        db.query(models.Workspace)
+        .filter(models.Workspace.id == workspace_id)
+        .one_or_none()
+    )
+    if workspace and workspace.created_by == user_id:
         return "OWNER"
     return None
 

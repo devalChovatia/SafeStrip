@@ -1,17 +1,17 @@
 import logging
 import os
-from enum import Enum
 from typing import Optional
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..permissions import require_role
+from ..permissions import require_role, ROLE_LEVEL
+from .. import models
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +30,15 @@ class WorkspaceOut(BaseModel):
     created_at: Optional[str] = None
 
 
-class MemberRole(str, Enum):
-    OWNER = "OWNER"
-    ADMIN = "ADMIN"
-    MEMBER = "MEMBER"
-    VIEWER = "VIEWER"
-
-
 class WorkspaceMemberCreateByEmail(BaseModel):
     email: EmailStr
-    role: MemberRole = MemberRole.MEMBER
+    role: models.MemberRole = models.MemberRole.MEMBER
 
 
 class WorkspaceMemberOut(BaseModel):
     workspace_id: UUID
     user_id: UUID
-    role: MemberRole
+    role: models.MemberRole
     created_at: Optional[str] = None
 
 
@@ -67,51 +60,43 @@ def list_workspaces(
     """
     try:
         if member_user_id:
-            rows = db.execute(
-                text(
-                    """
-                    SELECT DISTINCT w.id, w.name, w.created_by, w.created_at
-                    FROM workspaces w
-                    LEFT JOIN workspace_members wm
-                      ON wm.workspace_id = w.id
-                    WHERE wm.user_id = :member_user_id
-                       OR w.created_by = :member_user_id
-                    ORDER BY w.created_at DESC
-                    """
-                ),
-                {"member_user_id": member_user_id},
-            ).mappings().all()
-        elif created_by:
-            rows = db.execute(
-                text(
-                    """
-                    SELECT id, name, created_by, created_at
-                    FROM workspaces
-                    WHERE created_by = :created_by
-                    ORDER BY created_at DESC
-                    """
-                ),
-                {"created_by": created_by},
-            ).mappings().all()
-        else:
-            rows = db.execute(
-                text(
-                    """
-                    SELECT id, name, created_by, created_at
-                    FROM workspaces
-                    ORDER BY created_at DESC
-                    """
+            q = (
+                db.query(models.Workspace)
+                .outerjoin(
+                    models.WorkspaceMember,
+                    models.WorkspaceMember.workspace_id == models.Workspace.id,
                 )
-            ).mappings().all()
+                .filter(
+                    or_(
+                        models.WorkspaceMember.user_id == member_user_id,
+                        models.Workspace.created_by == member_user_id,
+                    )
+                )
+                .order_by(models.Workspace.created_at.desc())
+            )
+            workspaces = q.distinct(models.Workspace.id).all()
+        elif created_by:
+            workspaces = (
+                db.query(models.Workspace)
+                .filter(models.Workspace.created_by == created_by)
+                .order_by(models.Workspace.created_at.desc())
+                .all()
+            )
+        else:
+            workspaces = (
+                db.query(models.Workspace)
+                .order_by(models.Workspace.created_at.desc())
+                .all()
+            )
 
         return [
             {
-                "id": r["id"],
-                "name": r["name"],
-                "created_by": r["created_by"],
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "id": w.id,
+                "name": w.name,
+                "created_by": w.created_by,
+                "created_at": w.created_at.isoformat() if w.created_at else None,
             }
-            for r in rows
+            for w in workspaces
         ]
     except Exception as e:
         logger.exception("Failed to list workspaces")
@@ -124,45 +109,38 @@ def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db)):
     Creates a workspace. `created_at` defaults to now() in the DB.
     """
     try:
-        row = db.execute(
-            text(
-                """
-                INSERT INTO workspaces (name, created_by)
-                VALUES (:name, :created_by)
-                RETURNING id, name, created_by, created_at
-                """
-            ),
-            {"name": payload.name, "created_by": payload.created_by},
-        ).mappings().first()
-
-        if not row:
-            raise HTTPException(status_code=500, detail="Workspace insert failed")
+        workspace = models.Workspace(name=payload.name, created_by=payload.created_by)
+        db.add(workspace)
+        db.flush()  # populate workspace.id
 
         # Ensure the creator is also recorded as a workspace member (OWNER)
         if payload.created_by:
-            db.execute(
-                text(
-                    """
-                    INSERT INTO workspace_members (workspace_id, user_id, role)
-                    VALUES (:workspace_id, :user_id, :role)
-                    ON CONFLICT (workspace_id, user_id)
-                    DO UPDATE SET role = EXCLUDED.role
-                    """
-                ),
-                {
-                    "workspace_id": row["id"],
-                    "user_id": payload.created_by,
-                    "role": MemberRole.OWNER.value,
-                },
+            member = (
+                db.query(models.WorkspaceMember)
+                .filter(
+                    models.WorkspaceMember.workspace_id == workspace.id,
+                    models.WorkspaceMember.user_id == payload.created_by,
+                )
+                .one_or_none()
             )
+            if member is None:
+                member = models.WorkspaceMember(
+                    workspace_id=workspace.id,
+                    user_id=payload.created_by,
+                    role=MemberRole.OWNER.value,
+                )
+                db.add(member)
+            else:
+                member.role = MemberRole.OWNER.value
 
         db.commit()
+        db.refresh(workspace)
 
         return {
-            "id": row["id"],
-            "name": row["name"],
-            "created_by": row["created_by"],
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "id": workspace.id,
+            "name": workspace.name,
+            "created_by": workspace.created_by,
+            "created_at": workspace.created_at.isoformat() if workspace.created_at else None,
         }
     except HTTPException:
         db.rollback()
@@ -191,50 +169,57 @@ def list_workspace_members(
     """
     require_role(db, workspace_id, x_user_id, "VIEWER")
     try:
-        # Always include workspace creator as OWNER (even if legacy data is missing
-        # an explicit workspace_members row for them).
-        rows = db.execute(
-            text(
-                """
-                SELECT DISTINCT ON (t.user_id)
-                    t.user_id,
-                    t.role,
-                    t.display_name
-                FROM (
-                    SELECT wm.user_id, wm.role, p.display_name
-                    FROM workspace_members wm
-                    LEFT JOIN profiles p ON p.user_id = wm.user_id
-                    WHERE wm.workspace_id = :workspace_id
+        # Start with explicit workspace members
+        rows = (
+            db.query(
+                models.WorkspaceMember.user_id,
+                models.WorkspaceMember.role,
+                models.Profile.display_name,
+            )
+            .outerjoin(
+                models.Profile,
+                models.Profile.user_id == models.WorkspaceMember.user_id,
+            )
+            .filter(models.WorkspaceMember.workspace_id == workspace_id)
+            .all()
+        )
 
-                    UNION ALL
+        members: dict[UUID, dict] = {}
+        for user_id, role, display_name in rows:
+            existing = members.get(user_id)
+            if existing is None or ROLE_LEVEL.get(role, 0) > ROLE_LEVEL.get(
+                existing["role"], 0
+            ):
+                members[user_id] = {
+                    "user_id": user_id,
+                    "role": role,
+                    "display_name": display_name,
+                }
 
-                    SELECT w.created_by AS user_id, 'OWNER' AS role, p.display_name
-                    FROM workspaces w
-                    LEFT JOIN profiles p ON p.user_id = w.created_by
-                    WHERE w.id = :workspace_id AND w.created_by IS NOT NULL
-                ) t
-                ORDER BY
-                    t.user_id,
-                    CASE t.role
-                        WHEN 'OWNER' THEN 4
-                        WHEN 'ADMIN' THEN 3
-                        WHEN 'MEMBER' THEN 2
-                        WHEN 'VIEWER' THEN 1
-                        ELSE 0
-                    END DESC
-                """
-            ),
-            {"workspace_id": workspace_id},
-        ).mappings().all()
+        # Ensure workspace creator is present as OWNER
+        workspace = (
+            db.query(models.Workspace)
+            .filter(models.Workspace.id == workspace_id)
+            .one_or_none()
+        )
+        if workspace and workspace.created_by:
+            creator_id = workspace.created_by
+            existing = members.get(creator_id)
+            if existing is None or ROLE_LEVEL.get("OWNER", 0) > ROLE_LEVEL.get(
+                existing["role"], 0
+            ):
+                profile = (
+                    db.query(models.Profile)
+                    .filter(models.Profile.user_id == creator_id)
+                    .one_or_none()
+                )
+                members[creator_id] = {
+                    "user_id": creator_id,
+                    "role": "OWNER",
+                    "display_name": profile.display_name if profile else None,
+                }
 
-        return [
-            {
-                "user_id": r["user_id"],
-                "role": r["role"],
-                "display_name": r.get("display_name"),
-            }
-            for r in rows
-        ]
+        return list(members.values())
     except Exception as e:
         logger.exception("Failed to list workspace members")
         raise HTTPException(status_code=500, detail=str(e))
@@ -249,18 +234,19 @@ def delete_workspace(
     """Delete a workspace. Requires OWNER only."""
     require_role(db, workspace_id, x_user_id, "OWNER")
     try:
-        db.execute(
-            text("DELETE FROM workspace_members WHERE workspace_id = :workspace_id"),
-            {"workspace_id": workspace_id},
+        (
+            db.query(models.WorkspaceMember)
+            .filter(models.WorkspaceMember.workspace_id == workspace_id)
+            .delete(synchronize_session=False)
         )
-        db.execute(
-            text("DELETE FROM devices WHERE workspace_id = :workspace_id"),
-            {"workspace_id": workspace_id},
+        (
+            db.query(models.WorkspaceDevice)
+            .filter(models.WorkspaceDevice.workspace_id == workspace_id)
+            .delete(synchronize_session=False)
         )
-        db.execute(
-            text("DELETE FROM workspaces WHERE id = :workspace_id"),
-            {"workspace_id": workspace_id},
-        )
+        workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).one_or_none()
+        if workspace:
+            db.delete(workspace)
         db.commit()
     except Exception as e:
         logger.exception("Failed to delete workspace")
@@ -280,28 +266,23 @@ def list_devices_for_workspace(
     """
     require_role(db, workspace_id, x_user_id, "VIEWER")
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT id, workspace_id, device_name, status, last_seen_at, created_at
-                FROM devices
-                WHERE workspace_id = :workspace_id
-                ORDER BY created_at DESC
-                """
-            ),
-            {"workspace_id": workspace_id},
-        ).mappings().all()
+        devices = (
+            db.query(models.WorkspaceDevice)
+            .filter(models.WorkspaceDevice.workspace_id == workspace_id)
+            .order_by(models.WorkspaceDevice.created_at.desc())
+            .all()
+        )
 
         return [
             {
-                "id": str(r["id"]),
-                "workspace_id": str(r["workspace_id"]),
-                "device_name": r["device_name"],
-                "status": r.get("status"),
-                "last_seen_at": r["last_seen_at"].isoformat() if r.get("last_seen_at") else None,
-                "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                "id": str(d.id),
+                "workspace_id": str(d.workspace_id),
+                "device_name": d.device_name,
+                "status": d.status,
+                "last_seen_at": d.last_seen_at.isoformat() if d.last_seen_at else None,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
             }
-            for r in rows
+            for d in devices
         ]
     except Exception as e:
         logger.exception("Failed to list devices for workspace")
@@ -402,7 +383,7 @@ def add_member_to_workspace_by_email(
     auth user id and inserting into the `workspace_members` table.
     Requires OWNER or ADMIN. Only OWNER can assign OWNER or ADMIN roles.
     """
-    if payload.role in (MemberRole.OWNER, MemberRole.ADMIN):
+        if payload.role in (models.MemberRole.OWNER, models.MemberRole.ADMIN):
         require_role(db, workspace_id, x_user_id, "OWNER")
     else:
         require_role(db, workspace_id, x_user_id, "ADMIN")
@@ -413,35 +394,32 @@ def add_member_to_workspace_by_email(
         raise
 
     try:
-        row = db.execute(
-            text(
-                """
-                INSERT INTO workspace_members (workspace_id, user_id, role)
-                VALUES (:workspace_id, :user_id, :role)
-                ON CONFLICT (workspace_id, user_id)
-                DO UPDATE SET role = EXCLUDED.role
-                RETURNING workspace_id, user_id, role, created_at
-                """
-            ),
-            {
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-                "role": payload.role.value,
-            },
-        ).mappings().first()
+        member = (
+            db.query(models.WorkspaceMember)
+            .filter(
+                models.WorkspaceMember.workspace_id == workspace_id,
+                models.WorkspaceMember.user_id == user_id,
+            )
+            .one_or_none()
+        )
+        if member is None:
+            member = models.WorkspaceMember(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                role=payload.role.value,
+            )
+            db.add(member)
+        else:
+            member.role = payload.role.value
 
         db.commit()
-
-        if not row:
-            raise HTTPException(
-                status_code=500, detail="Failed to upsert workspace member"
-            )
+        db.refresh(member)
 
         return {
-            "workspace_id": row["workspace_id"],
-            "user_id": row["user_id"],
-            "role": row["role"],
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "workspace_id": member.workspace_id,
+            "user_id": member.user_id,
+            "role": member.role,
+            "created_at": member.created_at.isoformat() if member.created_at else None,
         }
     except HTTPException:
         db.rollback()

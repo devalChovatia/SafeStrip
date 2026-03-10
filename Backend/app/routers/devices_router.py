@@ -4,11 +4,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..permissions import require_role
+from .. import models
 
 logger = logging.getLogger(__name__)
 
@@ -29,39 +29,21 @@ def list_devices(
     if workspace_id and x_user_id:
         require_role(db, workspace_id, x_user_id, "VIEWER")
     try:
+        query = db.query(models.WorkspaceDevice)
         if workspace_id:
-            rows = db.execute(
-                text(
-                    """
-                    SELECT id, workspace_id, device_name, status, last_seen_at, created_at
-                    FROM devices
-                    WHERE workspace_id = :workspace_id
-                    ORDER BY created_at DESC
-                    """
-                ),
-                {"workspace_id": workspace_id},
-            ).mappings().all()
-        else:
-            rows = db.execute(
-                text(
-                    """
-                    SELECT id, workspace_id, device_name, status, last_seen_at, created_at
-                    FROM devices
-                    ORDER BY created_at DESC
-                    """
-                )
-            ).mappings().all()
+            query = query.filter(models.WorkspaceDevice.workspace_id == workspace_id)
+        devices = query.order_by(models.WorkspaceDevice.created_at.desc()).all()
 
         return [
             {
-                "id": str(r["id"]),
-                "workspace_id": str(r["workspace_id"]),
-                "device_name": r["device_name"],
-                "status": r.get("status"),
-                "last_seen_at": r["last_seen_at"].isoformat() if r.get("last_seen_at") else None,
-                "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                "id": str(d.id),
+                "workspace_id": str(d.workspace_id),
+                "device_name": d.device_name,
+                "status": d.status,
+                "last_seen_at": d.last_seen_at.isoformat() if d.last_seen_at else None,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
             }
-            for r in rows
+            for d in devices
         ]
     except Exception as e:
         logger.exception("Failed to list devices")
@@ -80,32 +62,21 @@ def create_device(
     """
     require_role(db, payload.workspace_id, x_user_id, "ADMIN")
     try:
-        row = db.execute(
-            text(
-                """
-                INSERT INTO devices (workspace_id, device_name)
-                VALUES (:workspace_id, :device_name)
-                RETURNING id, workspace_id, device_name, status, last_seen_at, created_at
-                """
-            ),
-            {
-                "workspace_id": payload.workspace_id,
-                "device_name": payload.device_name,
-            },
-        ).mappings().first()
-
+        device = models.WorkspaceDevice(
+            workspace_id=payload.workspace_id,
+            device_name=payload.device_name,
+        )
+        db.add(device)
         db.commit()
-
-        if not row:
-            raise HTTPException(status_code=500, detail="Device insert failed")
+        db.refresh(device)
 
         return {
-            "id": str(row["id"]),
-            "workspace_id": str(row["workspace_id"]),
-            "device_name": row["device_name"],
-            "status": row.get("status"),
-            "last_seen_at": row["last_seen_at"].isoformat() if row.get("last_seen_at") else None,
-            "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+            "id": str(device.id),
+            "workspace_id": str(device.workspace_id),
+            "device_name": device.device_name,
+            "status": device.status,
+            "last_seen_at": device.last_seen_at.isoformat() if device.last_seen_at else None,
+            "created_at": device.created_at.isoformat() if device.created_at else None,
         }
     except HTTPException:
         raise
