@@ -9,8 +9,12 @@ const char* deviceId = "69b69aa2-9177-438a-bab7-cb4f5da4a82e";
 
 const int waterPin = 34;
 const int gasPin = 32;
+const int tempPin = 35;
+
 const int waterThreshold = 3000;  // analog below this = water detected (adjust as needed)
 const int gasThreshold = 800;
+const float overheatThreshold = 35.0; //overheatThreshold>35 degree
+
 
 void setup() {
   Serial.begin(115200);
@@ -48,6 +52,26 @@ void loop() {
   } else {
     Serial.println("No gas Detected");
   }
+
+// -------- TEMP SENSOR --------
+
+// int tempRaw = analogRead(tempPin);
+// float temperatureC = (tempRaw / 4095.0) * 100.0;   // depend on the model of temp sensor we have
+int tempRaw = 3000;
+float temperatureC = 40.0; // just for test
+bool overheatDetected = (temperatureC > overheatThreshold);
+
+Serial.print("Temperature raw value: ");
+Serial.println(tempRaw);
+Serial.print("Temperature C: ");
+Serial.println(temperatureC);
+
+if (overheatDetected) {
+  Serial.println("Overheat detected");
+} else {
+  Serial.println("Temperature normal");
+}
+
 
   Serial.println("-----------------------------");
 
@@ -89,6 +113,29 @@ void loop() {
     // Serial.println(gasCode);
 
     // httpGas.end();
+
+    HTTPClient httpTemp;
+    String tempUrl = String(backendBaseUrl) + "/sensor-readings";
+    httpTemp.begin(tempUrl);
+    httpTemp.addHeader("Content-Type", "application/json");
+
+    String tempJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                    + String(q) + "sensor_type" + String(q) + ":" + String(q) + "temp" + String(q) + ","
+                    + String(q) + "value" + String(q) + ":" + String(temperatureC) + ","
+                    + String(q) + "unit" + String(q) + ":" + String(q) + "C" + String(q) + ","
+                    + String(q) + "raw" + String(q) + ":{"
+                    + String(q) + "tempRaw" + String(q) + ":" + String(tempRaw) + ","
+                    + String(q) + "temperatureC" + String(q) + ":" + String(temperatureC) + ","
+                    + String(q) + "overheatDetected" + String(q) + ":" + (overheatDetected ? "true" : "false") + ","
+                    + String(q) + "threshold" + String(q) + ":" + String(overheatThreshold) + "}}";
+
+    int tempCode = httpTemp.POST(tempJson);
+    Serial.print("POST /sensor-readings (temp) -> ");
+    Serial.println(tempCode);
+    httpTemp.end();
+
+
+
   }
   
 
