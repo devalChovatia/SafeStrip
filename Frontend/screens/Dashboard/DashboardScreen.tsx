@@ -21,6 +21,10 @@ import { Card } from "@/components/ui/card";
 import { Button, ButtonText } from "@/components/ui/button";
 import { fetchLatestWaterReading } from "@/services/api/sensorReadingsApi";
 import {
+	fetchDeviceOutletsForDevice,
+	updateDeviceOutletActive,
+} from "@/services/api/deviceOutletsApi";
+import {
 	Workspace,
 	DeviceStrip,
 	fetchWorkspaces,
@@ -37,6 +41,7 @@ import { useAppSelector } from "@/store";
 
 interface Outlet {
 	id: number;
+	dbId?: string;
 	name: string;
 	powerOn: boolean;
 	temperature: number;
@@ -179,6 +184,47 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 		return () => {
 			cancelled = true;
 			clearInterval(interval);
+		};
+	}, [view, selectedDeviceId]);
+
+	// For the demo device, load outlets from the device_outlets table
+	useEffect(() => {
+		if (view !== "deviceDetail" || selectedDeviceId !== DEMO_DEVICE_ID) {
+			return;
+		}
+
+		let cancelled = false;
+
+		const loadOutlets = async () => {
+			try {
+				const apiOutlets = await fetchDeviceOutletsForDevice(DEMO_DEVICE_ID);
+				if (cancelled) return;
+
+				setOutlets((prev) => {
+					// Preserve existing sensor readings where possible but replace power + labels
+					return apiOutlets.map((o, index) => {
+						const existing = prev[index];
+						return {
+							id: index + 1,
+							dbId: o.id,
+							name: o.outlet_name,
+							powerOn: o.is_active,
+							temperature: existing?.temperature ?? 24,
+							current: existing?.current ?? 0,
+							smokeDetected: existing?.smokeDetected ?? false,
+							waterDetected: existing?.waterDetected ?? false,
+						};
+					});
+				});
+			} catch {
+				// swallow errors for demo
+			}
+		};
+
+		void loadOutlets();
+
+		return () => {
+			cancelled = true;
 		};
 	}, [view, selectedDeviceId]);
 
@@ -328,9 +374,34 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 		};
 	};
 
-	const handlePowerToggle = (outletId: number) => {
+	const handlePowerToggle = async (outletId: number) => {
+		// Find outlet in state
+		setOutlets((prev) => prev);
+
+		const target = outlets.find((o) => o.id === outletId);
+		if (!target) return;
+
+		// For the demo device, sync with backend using the outlet's DB id
+		if (selectedDeviceId === DEMO_DEVICE_ID && target.dbId) {
+			const nextPower = !target.powerOn;
+			try {
+				await updateDeviceOutletActive(target.dbId, nextPower);
+				setOutlets((prev) =>
+					prev.map((outlet) =>
+						outlet.id === outletId ? { ...outlet, powerOn: nextPower } : outlet,
+					),
+				);
+				return;
+			} catch {
+				// fall through to local-only toggle if API fails
+			}
+		}
+
+		// Fallback: local-only toggle
 		setOutlets((prev) =>
-			prev.map((outlet) => (outlet.id === outletId ? { ...outlet, powerOn: !outlet.powerOn } : outlet)),
+			prev.map((outlet) =>
+				outlet.id === outletId ? { ...outlet, powerOn: !outlet.powerOn } : outlet,
+			),
 		);
 	};
 

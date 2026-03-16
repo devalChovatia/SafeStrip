@@ -15,6 +15,7 @@ from .routers import (
     workspaces_router,
     devices_router,
     profiles_router,
+    device_outlets_router,
 )
 
 app = FastAPI()
@@ -49,3 +50,4 @@ app.include_router(sensor_readings_router.router)
 app.include_router(workspaces_router.router)
 app.include_router(devices_router.router)
 app.include_router(profiles_router.router)
+app.include_router(device_outlets_router.router)

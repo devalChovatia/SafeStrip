@@ -89,6 +89,15 @@ class SensorReading(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class DeviceOutlet(Base):
+    __tablename__ = 'device_outlets'
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    device_id = Column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    is_active = Column(Boolean, nullable=False, default=False)
+    outlet_name = Column(String, nullable=False)
+
+
 class AlertRule(Base):
     __tablename__ = 'alert_rules'
     
