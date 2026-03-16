@@ -9,11 +9,11 @@ const char* deviceId = "69b69aa2-9177-438a-bab7-cb4f5da4a82e";
 
 const int waterPin = 34;
 const int gasPin = 32;
-const int tempPin = 35;
+const int tempPin = 33;
 
 const int waterThreshold = 3000;  // analog below this = water detected (adjust as needed)
-const int gasThreshold = 800;
-const float overheatThreshold = 35.0; //overheatThreshold>35 degree
+const int gasThreshold = 1000;
+const int overheatThreshold = 300; 
 
 
 void setup() {
@@ -53,24 +53,24 @@ void loop() {
     Serial.println("No gas Detected");
   }
 
-// -------- TEMP SENSOR --------
+  // -------- TEMP SENSOR --------
 
-// int tempRaw = analogRead(tempPin);
-// float temperatureC = (tempRaw / 4095.0) * 100.0;   // depend on the model of temp sensor we have
-int tempRaw = 3000;
-float temperatureC = 40.0; // just for test
-bool overheatDetected = (temperatureC > overheatThreshold);
+  // int tempRaw = analogRead(tempPin);
+  // float temperatureC = (tempRaw / 4095.0) * 100.0;   // depend on the model of temp sensor we have
+  int tempValue =analogRead(tempPin);
+  float temperatureC =(tempValue / 4095.0) * 100.0; 
+  bool overheatDetected = (tempValue > overheatThreshold);
 
-Serial.print("Temperature raw value: ");
-Serial.println(tempRaw);
-Serial.print("Temperature C: ");
-Serial.println(temperatureC);
+  Serial.print("Temperature raw value: ");
+  Serial.println(tempValue);
+  Serial.print("Temperature C: ");
+  Serial.println(temperatureC);
 
-if (overheatDetected) {
-  Serial.println("Overheat detected");
-} else {
-  Serial.println("Temperature normal");
-}
+  if (overheatDetected) {
+    Serial.println("Overheat detected");
+  } else {
+    Serial.println("Temperature normal");
+  }
 
 
   Serial.println("-----------------------------");
@@ -124,7 +124,7 @@ if (overheatDetected) {
                     + String(q) + "value" + String(q) + ":" + String(temperatureC) + ","
                     + String(q) + "unit" + String(q) + ":" + String(q) + "C" + String(q) + ","
                     + String(q) + "raw" + String(q) + ":{"
-                    + String(q) + "tempRaw" + String(q) + ":" + String(tempRaw) + ","
+                    + String(q) + "tempValue" + String(q) + ":" + String(tempValue) + ","
                     + String(q) + "temperatureC" + String(q) + ":" + String(temperatureC) + ","
                     + String(q) + "overheatDetected" + String(q) + ":" + (overheatDetected ? "true" : "false") + ","
                     + String(q) + "threshold" + String(q) + ":" + String(overheatThreshold) + "}}";
