@@ -19,21 +19,29 @@ export const StatusCard: React.FC<StatusCardProps> = ({
       container: { backgroundColor: '#ecfdf5', borderColor: '#bbf7d0' },
       text: { color: '#166534' },
       dot: { backgroundColor: '#22c55e' },
+      badge: { backgroundColor: '#dcfce7' },
+      icon: '🛡️',
     },
     warning: {
       container: { backgroundColor: '#fffbeb', borderColor: '#fde68a' },
       text: { color: '#92400e' },
       dot: { backgroundColor: '#f59e0b' },
+      badge: { backgroundColor: '#fef3c7' },
+      icon: '⚠️',
     },
     danger: {
       container: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
       text: { color: '#991b1b' },
       dot: { backgroundColor: '#ef4444' },
+      badge: { backgroundColor: '#fee2e2' },
+      icon: '🚨',
     },
     neutral: {
       container: { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' },
       text: { color: '#334155' },
       dot: { backgroundColor: '#94a3b8' },
+      badge: { backgroundColor: '#e2e8f0' },
+      icon: '⏸️',
     },
   };
 
@@ -49,8 +57,12 @@ export const StatusCard: React.FC<StatusCardProps> = ({
           <Text style={[s.statusText, styles.text]}>
             {status}
           </Text>
+          <Text style={[s.subText, styles.text]}>
+            Real-time safety health across connected outlets
+          </Text>
         </View>
-        <View style={s.dotWrap}>
+        <View style={[s.dotWrap, styles.badge]}>
+          <Text style={s.badgeIcon}>{styles.icon}</Text>
           <View style={[s.dot, styles.dot]} />
         </View>
       </View>
@@ -73,33 +85,53 @@ const s = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     padding: 18,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    marginBottom: 10,
   },
   headerTextWrap: {
     flex: 1,
+    paddingRight: 10,
   },
   kicker: {
     fontSize: 12,
     fontWeight: '600',
     opacity: 0.8,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   statusText: {
-    fontSize: 34,
+    fontSize: 23,
     fontWeight: '800',
-    lineHeight: 40,
+    lineHeight: 28,
+  },
+  subText: {
+    marginTop: 6,
+    fontSize: 12,
+    opacity: 0.78,
   },
   dotWrap: {
     marginLeft: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeIcon: {
+    fontSize: 13,
+    marginBottom: 2,
   },
   dot: {
-    width: 12,
-    height: 12,
+    width: 6,
+    height: 6,
     borderRadius: 999,
   },
   footerRow: {
@@ -110,7 +142,7 @@ const s = StyleSheet.create({
   footerStrong: {
     fontSize: 14,
     fontWeight: '700',
-    opacity: 0.9,
+    opacity: 0.95,
   },
   footerText: {
     fontSize: 14,

@@ -67,6 +67,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 	const [devices, setDevices] = useState<DeviceStrip[]>([]);
 	const [roomsTab, setRoomsTab] = useState<RoomsTab>("my");
 	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
+	const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 	const [deviceModalWorkspaceId, setDeviceModalWorkspaceId] = useState<string | null>(null);
 	const [memberModalWorkspaceId, setMemberModalWorkspaceId] = useState<string | null>(null);
@@ -405,6 +406,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 		);
 	};
 
+	const handleRenameOutlet = (outletId: number, nextName: string) => {
+		const normalized = nextName.trim();
+		if (!normalized) return;
+		setOutlets((prev) =>
+			prev.map((outlet) => (outlet.id === outletId ? { ...outlet, name: normalized } : outlet)),
+		);
+	};
+
 	const getTimeSinceUpdate = () => {
 		const seconds = Math.floor((Date.now() - lastUpdate.getTime()) / 1000);
 		return `Updated ${seconds} seconds ago`;
@@ -455,6 +464,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 		}
 	};
 
+	const handleRemoveDeviceLocal = (deviceId: string) => {
+		setDevices((prev) => prev.filter((d) => d.id !== deviceId));
+	};
+
 	const handleInviteMember = async () => {
 		if (!memberModalWorkspace) return;
 		if (!inviteEmail.trim()) return;
@@ -480,6 +493,45 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 			setSelectedWorkspaceId(dev.workspace_id);
 		}
 		setView("deviceDetail");
+	};
+
+	const renderDashboardOverview = () => {
+		const totalDevices = devices.length;
+		const activeDevices = devices.filter((d) => {
+			const status = (d.status ?? "").toLowerCase();
+			return status === "online" || status === "active";
+		}).length;
+		const warningDevices = devices.filter((d) => {
+			const status = (d.status ?? "").toLowerCase();
+			return status === "warning" || status === "danger";
+		}).length;
+
+		return (
+			<View className="mb-4 rounded-2xl overflow-hidden border border-blue-200 bg-blue-600">
+				<View className="px-4 py-4">
+					<Text className="text-blue-100 text-xs font-semibold uppercase tracking-wide">Safety overview</Text>
+					<Text className="text-white text-base font-semibold mt-1">
+						Monitor rooms, devices, and outlet risks in one place
+					</Text>
+				</View>
+				<View className="px-4 pb-4">
+					<View className="flex-row gap-2">
+						<View className="flex-1 rounded-xl bg-white/15 border border-white/20 px-3 py-3">
+							<Text className="text-white text-xl font-bold">{totalDevices}</Text>
+							<Text className="text-blue-100 text-xs mt-0.5">Total devices</Text>
+						</View>
+						<View className="flex-1 rounded-xl bg-white/15 border border-white/20 px-3 py-3">
+							<Text className="text-emerald-200 text-xl font-bold">{activeDevices}</Text>
+							<Text className="text-blue-100 text-xs mt-0.5">Active now</Text>
+						</View>
+						<View className="flex-1 rounded-xl bg-white/15 border border-white/20 px-3 py-3">
+							<Text className="text-amber-200 text-xl font-bold">{warningDevices}</Text>
+							<Text className="text-blue-100 text-xs mt-0.5">Warnings</Text>
+						</View>
+					</View>
+				</View>
+			</View>
+		);
 	};
 
 	const renderDeviceDetail = () => {
@@ -528,6 +580,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 									key={outlet.id}
 									outlet={outlet}
 									onPowerToggle={() => handlePowerToggle(outlet.id)}
+									onRename={(name) => handleRenameOutlet(outlet.id, name)}
 									powerDisabled={!canControlPower(getMyRoleInWorkspace(selectedDevice.workspace_id))}
 								/>
 							))}
@@ -543,6 +596,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 	};
 
 	const renderDevicesList = () => {
+		const primaryActionBtnClass = "rounded-[16px] h-11 px-3 bg-[#2563eb] border border-[#2563eb] max-w-full";
+		const secondaryActionBtnClass = "rounded-[16px] h-11 px-4 bg-white border border-slate-300";
+		const actionBtnTextClass = "text-sm font-semibold";
+
 		if (workspaces.length === 0) {
 			return (
 				<ScrollView
@@ -550,14 +607,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 					contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
 					showsVerticalScrollIndicator={false}
 				>
+					{renderDashboardOverview()}
 					<View className="bg-white rounded-2xl border border-dashed border-slate-300 p-5">
 						<Text className="text-slate-900 text-base font-semibold mb-2">Create your first room</Text>
 						<Text className="text-slate-500 text-sm mb-4">
 							Group your SafeStrip devices by room, like “Kitchen” or “Bedroom”.
 						</Text>
-						<Button onPress={() => setWorkspaceModalOpen(true)}>
-							<ButtonText>Create room</ButtonText>
-						</Button>
+					<Button className={`${primaryActionBtnClass} self-start`} onPress={() => setWorkspaceModalOpen(true)}>
+						<Ionicons name="add" size={18} color="#ffffff" />
+						<ButtonText className={`text-white ${actionBtnTextClass}`}>New Room</ButtonText>
+					</Button>
 					</View>
 				</ScrollView>
 			);
@@ -569,11 +628,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 				contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
 				showsVerticalScrollIndicator={false}
 			>
-				<View className="mb-4 flex-row items-center justify-between">
-					<Text className="text-slate-900 text-lg font-semibold">Rooms</Text>
-					<Button size="sm" onPress={() => setWorkspaceModalOpen(true)}>
-						<ButtonText>New room</ButtonText>
-					</Button>
+				{renderDashboardOverview()}
+				<View className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+					<View className="gap-3">
+						<View>
+							<Text className="text-slate-900 text-lg font-semibold">Rooms</Text>
+							<Text className="text-slate-500 text-xs mt-0.5">Manage devices by room and members</Text>
+						</View>
+						<Button size="sm" className={`${primaryActionBtnClass} self-start`} onPress={() => setWorkspaceModalOpen(true)}>
+							<Ionicons name="add" size={18} color="#ffffff" />
+							<ButtonText className={`text-white ${actionBtnTextClass}`}>New Room</ButtonText>
+						</Button>
+					</View>
 				</View>
 
 				{/* Tabs */}
@@ -585,7 +651,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 						<Text
 							className={`text-center text-sm font-semibold ${roomsTab === "my" ? "text-slate-900" : "text-slate-600"}`}
 						>
-							My rooms
+							My rooms ({myRooms.length})
 						</Text>
 					</Pressable>
 					<Pressable
@@ -597,21 +663,32 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 								roomsTab === "shared" ? "text-slate-900" : "text-slate-600"
 							}`}
 						>
-							Shared
+							Shared ({sharedRooms.length})
 						</Text>
 					</Pressable>
 				</View>
 
 				{visibleRooms.length === 0 ? (
-					<View className="bg-white rounded-2xl border border-dashed border-slate-300 p-5">
+					<View className="bg-white rounded-2xl border border-dashed border-slate-300 p-5 items-center">
+						<Ionicons
+							name={roomsTab === "my" ? "home-outline" : "people-outline"}
+							size={28}
+							color="#94a3b8"
+						/>
 						<Text className="text-slate-900 text-base font-semibold mb-2">
 							{roomsTab === "my" ? "No rooms yet" : "No shared rooms yet"}
 						</Text>
-						<Text className="text-slate-500 text-sm">
+						<Text className="text-slate-500 text-sm text-center">
 							{roomsTab === "my"
 								? "Create a room to start organizing your SafeStrip devices."
 								: "When someone shares a room with you, it will show up here."}
 						</Text>
+						{roomsTab === "my" ? (
+							<Button size="sm" className={`${primaryActionBtnClass} mt-4 self-start`} onPress={() => setWorkspaceModalOpen(true)}>
+								<Ionicons name="add" size={18} color="#ffffff" />
+								<ButtonText className={`text-white ${actionBtnTextClass}`}>New Room</ButtonText>
+							</Button>
+						) : null}
 					</View>
 				) : null}
 
@@ -620,36 +697,65 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 					const myRole = getMyRoleInWorkspace(ws.id);
 					const showShare = canManageMembers(myRole);
 					const showAddDevice = canManageDevices(myRole);
+					const isHovered = hoveredRoomId === ws.id;
 					return (
-						<Card key={ws.id} className="mb-4 p-4">
-							<View className="flex-row items-center justify-between mb-2">
-								<View className="flex-1 pr-2">
-									<Text className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Room</Text>
-									<Text className="text-slate-900 text-lg font-semibold mt-0.5">{ws.name}</Text>
+						<Pressable
+							key={ws.id}
+							onHoverIn={() => setHoveredRoomId(ws.id)}
+							onHoverOut={() => setHoveredRoomId((prev) => (prev === ws.id ? null : prev))}
+						>
+							<Card
+								className={`mb-4 p-6 rounded-3xl border ${
+									isHovered
+										? "border-slate-400 bg-white"
+										: "border-slate-300 bg-slate-50"
+								}`}
+							>
+							<View className="mb-6 gap-3">
+								<View className="min-w-0">
+									<Text className="text-sm font-semibold text-slate-500 uppercase tracking-widest">Room</Text>
+									<Text className="text-slate-900 text-xl font-bold mt-1" numberOfLines={2}>
+										{ws.name}
+									</Text>
+									<View className="flex-row items-center gap-2 mt-1">
+										<View className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+											<Text className="text-[10px] font-semibold text-slate-600">{wsDevices.length} devices</Text>
+										</View>
+										{myRole ? (
+											<View className="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200">
+												<Text className="text-[10px] font-semibold text-blue-700">{myRole}</Text>
+											</View>
+										) : null}
+									</View>
 								</View>
-								<View className="flex-row gap-2">
+								<View className="flex-row gap-2 items-center flex-wrap">
 									{showShare && (
 										<Button
 											size="sm"
 											variant="outline"
+											className={secondaryActionBtnClass}
 											onPress={() => {
 												setMemberModalWorkspaceId(ws.id);
 												setInviteRole("MEMBER");
 												setMemberModalOpen(true);
 											}}
 										>
-											<ButtonText>Share</ButtonText>
+											<Ionicons name="share-social-outline" size={16} color="#0f172a" />
+											<ButtonText className={`text-slate-900 ${actionBtnTextClass}`}>Share</ButtonText>
 										</Button>
 									)}
 									{showAddDevice && (
 										<Button
 											size="sm"
+											variant="outline"
+											className={secondaryActionBtnClass}
 											onPress={() => {
 												setDeviceModalWorkspaceId(ws.id);
 												setDeviceModalOpen(true);
 											}}
 										>
-											<ButtonText>Add device</ButtonText>
+											<Ionicons name="add" size={18} color="#0f172a" />
+											<ButtonText className={`text-slate-900 ${actionBtnTextClass}`}>Add Device</ButtonText>
 										</Button>
 									)}
 									{canDeleteWorkspace(myRole) && (
@@ -703,30 +809,37 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 									{showAddDevice && (
 										<Button
 											size="sm"
+											variant="outline"
+											className={secondaryActionBtnClass}
 											onPress={() => {
 												setDeviceModalWorkspaceId(ws.id);
 												setDeviceModalOpen(true);
 											}}
 										>
-											<ButtonText>Add first device</ButtonText>
+											<Ionicons name="add" size={18} color="#0f172a" />
+											<ButtonText className={`text-slate-900 ${actionBtnTextClass}`}>Add Device</ButtonText>
 										</Button>
 									)}
 								</View>
 							) : (
 								<View className="mt-2">
-									{wsDevices.map((d) => (
+									{wsDevices.map((d, index) => (
 										<DeviceCard
 											key={d.id}
 											name={d.device_name}
 											workspaceName={ws.name}
 											status={d.status}
 											lastSeenAt={d.last_seen_at ?? undefined}
+											outletsCount={4 + (index % 3) * 2}
+											powerUsageW={index % 2 === 0 ? 145 + index * 12 : undefined}
+											onDelete={() => handleRemoveDeviceLocal(d.id)}
 											onOpen={() => openDeviceDetail(d.id)}
 										/>
 									))}
 								</View>
 							)}
-						</Card>
+							</Card>
+						</Pressable>
 					);
 				})}
 			</ScrollView>
