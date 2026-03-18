@@ -79,6 +79,10 @@ export const OutletCard: React.FC<OutletCardProps> = ({
 
   const saveName = () => {
     const next = draftName.trim() || outlet.name;
+    if (next === outlet.name) {
+      setEditingName(false);
+      return;
+    }
     onRename(next);
     setEditingName(false);
   };
