@@ -1,4 +1,5 @@
 import logging
+import uuid
 from typing import Optional
 from uuid import UUID
 
@@ -94,10 +95,27 @@ def create_device(
             },
         ).mappings().first()
 
-        db.commit()
-
         if not row:
             raise HTTPException(status_code=500, detail="Device insert failed")
+
+        device_id = row["id"]
+        for n in range(1, 5):
+            db.execute(
+                text(
+                    """
+                    INSERT INTO device_outlets (id, device_id, is_active, outlet_name)
+                    VALUES (:id, :device_id, :is_active, :outlet_name)
+                    """
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "device_id": device_id,
+                    "is_active": False,
+                    "outlet_name": f"Outlet {n}",
+                },
+            )
+
+        db.commit()
 
         return {
             "id": str(row["id"]),
@@ -111,6 +129,48 @@ def create_device(
         raise
     except Exception as e:
         logger.exception("Failed to create device")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{device_id}", status_code=204)
+def delete_device(
+    device_id: UUID,
+    x_user_id: Optional[UUID] = Header(None, alias="X-User-Id"),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently delete a device and related rows (outlets, sensor readings).
+    Requires OWNER or ADMIN in the device's workspace.
+    """
+    try:
+        row = db.execute(
+            text("SELECT workspace_id FROM devices WHERE id = :device_id"),
+            {"device_id": device_id},
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        workspace_id = row["workspace_id"]
+        require_role(db, workspace_id, x_user_id, "ADMIN")
+
+        db.execute(
+            text("DELETE FROM device_outlets WHERE device_id = :device_id"),
+            {"device_id": device_id},
+        )
+        db.execute(
+            text("DELETE FROM sensor_readings WHERE device_id = :device_id"),
+            {"device_id": device_id},
+        )
+        db.execute(
+            text("DELETE FROM devices WHERE id = :device_id"),
+            {"device_id": device_id},
+        )
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete device")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 

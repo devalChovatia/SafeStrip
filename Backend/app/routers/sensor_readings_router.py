@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import SensorReading, SensorType
+from ..mqtt_publish import publish_dashboard_event
 
 router = APIRouter(prefix="/sensor-readings", tags=["sensor-readings"])
 logger = logging.getLogger(__name__)
@@ -41,10 +42,24 @@ def create_sensor_reading(payload: SensorReadingCreate, db: Session = Depends(ge
         db.add(row)
         db.commit()
         db.refresh(row)
+        st = row.sensor_type.value if hasattr(row.sensor_type, "value") else row.sensor_type
+        device_id_str = str(row.device_id)
+        publish_dashboard_event(
+            device_id_str,
+            {
+                "ev": "sensor",
+                "device_id": device_id_str,
+                "sensor_type": st,
+                "value": float(row.value),
+                "unit": row.unit,
+                "raw": row.raw,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            },
+        )
         return {
             "id": str(row.id),
-            "device_id": str(row.device_id),
-            "sensor_type": row.sensor_type.value if hasattr(row.sensor_type, "value") else row.sensor_type,
+            "device_id": device_id_str,
+            "sensor_type": st,
             "value": float(row.value),
             "unit": row.unit,
             "raw": row.raw,

@@ -62,6 +62,10 @@ export async function createDevice(payload: { workspace_id: string; device_name:
 	return res.data;
 }
 
+export async function deleteDevice(deviceId: string): Promise<void> {
+	await apiClient.delete(`/api/devices/${deviceId}`);
+}
+
 export async function deleteWorkspace(workspaceId: string): Promise<void> {
 	await apiClient.delete(`/api/workspaces/${workspaceId}`);
 }

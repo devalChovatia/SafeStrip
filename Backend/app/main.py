@@ -1,12 +1,14 @@
 from pathlib import Path
 import os
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import models 
+from . import models
+from . import mqtt_publish
 from .database import engine
 from .routers import (
     null_router,
@@ -18,7 +20,14 @@ from .routers import (
     device_outlets_router,
 )
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    mqtt_publish.shutdown()
+
+
+app = FastAPI(lifespan=lifespan)
 
 # CORS
 # In dev we allow localhost / Expo dev tools. In prod, tighten this.

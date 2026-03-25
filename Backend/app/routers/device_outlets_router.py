@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..mqtt_publish import publish_dashboard_event
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +103,21 @@ def update_device_outlet(
         if not row:
             raise HTTPException(status_code=404, detail="Outlet not found")
 
+        device_id_str = str(row["device_id"])
+        publish_dashboard_event(
+            device_id_str,
+            {
+                "ev": "outlet",
+                "id": str(row["id"]),
+                "device_id": device_id_str,
+                "is_active": row["is_active"],
+                "outlet_name": row["outlet_name"],
+            },
+        )
+
         return {
             "id": str(row["id"]),
-            "device_id": str(row["device_id"]),
+            "device_id": device_id_str,
             "is_active": row["is_active"],
             "outlet_name": row["outlet_name"],
         }

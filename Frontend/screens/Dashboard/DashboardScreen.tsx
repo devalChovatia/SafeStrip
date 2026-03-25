@@ -34,10 +34,12 @@ import {
 	addWorkspaceMemberByEmail,
 	fetchWorkspaceMembers,
 	deleteWorkspace,
+	deleteDevice,
 	type WorkspaceMemberWithProfile,
 	type MemberRole,
 } from "@/services/api/workspacesApi";
 import { useAppSelector } from "@/store";
+import { subscribeDeviceDashboard } from "@/services/mqtt/subscribeDashboard";
 
 interface Outlet {
 	id: number;
@@ -57,8 +59,13 @@ interface DashboardScreenProps {
 	onOpenSettings?: () => void;
 }
 
+function waterDetectedFromReading(reading: { value?: unknown; raw?: unknown }): boolean {
+	const raw = reading.raw as { waterDetected?: boolean } | null | undefined;
+	if (raw && typeof raw.waterDetected === "boolean") return raw.waterDetected;
+	return Number(reading.value ?? 0) > 0;
+}
+
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings }) => {
-	const DEMO_DEVICE_ID = "b2c3bd18-1fd6-4a85-b7c5-20e830f86859";
 	const insets = useSafeAreaInsets();
 	const currentUserId = useAppSelector((s) => s.auth.user?.id);
 
@@ -86,139 +93,46 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 	const [inviteRole, setInviteRole] = useState<MemberRole>("MEMBER");
 	const [workspaceMembers, setWorkspaceMembers] = useState<Record<string, WorkspaceMemberWithProfile[]>>({});
 
-	// Mock outlet data (per-device dashboard)
 	const [lastUpdate, setLastUpdate] = useState(new Date());
-	const [outlets, setOutlets] = useState<Outlet[]>([
-		{
-			id: 1,
-			name: "Outlet 1",
-			powerOn: true,
-			temperature: 24.5,
-			current: 2.3,
-			smokeDetected: false,
-			waterDetected: false,
-		},
-		{
-			id: 2,
-			name: "Outlet 2",
-			powerOn: true,
-			temperature: 26.8,
-			current: 4.1,
-			smokeDetected: false,
-			waterDetected: false,
-		},
-		{
-			id: 3,
-			name: "Outlet 3",
-			powerOn: false,
-			temperature: 23.2,
-			current: 0,
-			smokeDetected: false,
-			waterDetected: false,
-		},
-		{
-			id: 4,
-			name: "Outlet 4",
-			powerOn: true,
-			temperature: 25.1,
-			current: 1.8,
-			smokeDetected: false,
-			waterDetected: false,
-		},
-	]);
+	const [outlets, setOutlets] = useState<Outlet[]>([]);
 
-	// Simulate live sensor updates
+	// Load outlets from device_outlets + latest water reading for the selected device (detail view).
 	useEffect(() => {
-		const interval = setInterval(() => {
-			setOutlets((prev) =>
-				prev.map((outlet) => ({
-					...outlet,
-					temperature: outlet.powerOn
-						? Math.max(20, Math.min(45, outlet.temperature + (Math.random() - 0.5) * 0.3))
-						: outlet.temperature,
-					current: outlet.powerOn ? Math.max(0, Math.min(10, outlet.current + (Math.random() - 0.5) * 0.1)) : 0,
-				})),
-			);
-			setLastUpdate(new Date());
-		}, 3000);
-
-		return () => clearInterval(interval);
-	}, []);
-
-	// Demo: poll water sensor for outlet 1 on the demo device
-	useEffect(() => {
-		// selectedDevice is declared later; guard using id only here
-		if (view !== "deviceDetail" || selectedDeviceId !== DEMO_DEVICE_ID) {
+		if (view !== "deviceDetail" || !selectedDeviceId) {
 			return;
 		}
 
 		let cancelled = false;
-
-		const updateFromReading = async () => {
-			try {
-				const reading = await fetchLatestWaterReading(DEMO_DEVICE_ID);
-				if (!reading || cancelled) return;
-
-				const raw = reading.raw as { waterDetected?: boolean } | null | undefined;
-				const waterDetected =
-					raw && typeof raw.waterDetected === "boolean" ? raw.waterDetected : Number(reading.value) > 0;
-
-				setOutlets((prev) =>
-					prev.map((outlet) =>
-						outlet.id === 1
-							? {
-									...outlet,
-									waterDetected,
-								}
-							: outlet,
-					),
-				);
-			} catch {
-				// ignore polling errors in demo
-			}
-		};
-
-		// initial fetch
-		void updateFromReading();
-		const interval = setInterval(updateFromReading, 1000);
-
-		return () => {
-			cancelled = true;
-			clearInterval(interval);
-		};
-	}, [view, selectedDeviceId]);
-
-	// For the demo device, load outlets from the device_outlets table
-	useEffect(() => {
-		if (view !== "deviceDetail" || selectedDeviceId !== DEMO_DEVICE_ID) {
-			return;
-		}
-
-		let cancelled = false;
+		setOutlets([]);
 
 		const loadOutlets = async () => {
 			try {
-				const apiOutlets = await fetchDeviceOutletsForDevice(DEMO_DEVICE_ID);
+				const apiOutlets = await fetchDeviceOutletsForDevice(selectedDeviceId);
 				if (cancelled) return;
 
-				setOutlets((prev) => {
-					// Preserve existing sensor readings where possible but replace power + labels
-					return apiOutlets.map((o, index) => {
-						const existing = prev[index];
-						return {
-							id: index + 1,
-							dbId: o.id,
-							name: o.outlet_name,
-							powerOn: o.is_active,
-							temperature: existing?.temperature ?? 24,
-							current: existing?.current ?? 0,
-							smokeDetected: existing?.smokeDetected ?? false,
-							waterDetected: existing?.waterDetected ?? false,
-						};
-					});
-				});
+				let waterOnFirstOutlet = false;
+				try {
+					const reading = await fetchLatestWaterReading(selectedDeviceId);
+					if (reading) waterOnFirstOutlet = waterDetectedFromReading(reading);
+				} catch {
+					// optional sensor
+				}
+
+				setOutlets(
+					apiOutlets.map((o, index) => ({
+						id: index + 1,
+						dbId: o.id,
+						name: o.outlet_name,
+						powerOn: o.is_active,
+						temperature: 24,
+						current: 0,
+						smokeDetected: false,
+						waterDetected: index === 0 ? waterOnFirstOutlet : false,
+					})),
+				);
+				setLastUpdate(new Date());
 			} catch {
-				// swallow errors for demo
+				if (!cancelled) setOutlets([]);
 			}
 		};
 
@@ -227,6 +141,61 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 		return () => {
 			cancelled = true;
 		};
+	}, [view, selectedDeviceId]);
+
+	// Live outlet + sensor updates via MQTT (backend publishes on PATCH outlet + POST sensor-reading).
+	useEffect(() => {
+		if (view !== "deviceDetail" || !selectedDeviceId) {
+			return;
+		}
+
+		const deviceId = selectedDeviceId;
+		const disconnect = subscribeDeviceDashboard(deviceId, {
+			onOutlet: ({ id, is_active, outlet_name }) => {
+				setOutlets((prev) => {
+					const idx = prev.findIndex((o) => o.dbId === id);
+					if (idx >= 0) {
+						return prev.map((outlet) =>
+							outlet.dbId === id
+								? {
+										...outlet,
+										powerOn: is_active,
+										name: outlet_name ?? outlet.name,
+									}
+								: outlet,
+						);
+					}
+					return [
+						...prev,
+						{
+							id: prev.length + 1,
+							dbId: id,
+							name: outlet_name ?? "Outlet",
+							powerOn: is_active,
+							temperature: 24,
+							current: 0,
+							smokeDetected: false,
+							waterDetected: false,
+						},
+					];
+				});
+				setLastUpdate(new Date());
+			},
+			onSensor: ({ sensor_type, value, raw }) => {
+				if (sensor_type !== "water") return;
+				const waterDetected = waterDetectedFromReading({ value, raw });
+				setOutlets((prev) =>
+					prev.length === 0
+						? prev
+						: prev.map((outlet, index) =>
+								index === 0 ? { ...outlet, waterDetected } : outlet,
+							),
+				);
+				setLastUpdate(new Date());
+			},
+		});
+
+		return disconnect;
 	}, [view, selectedDeviceId]);
 
 	// Load rooms (workspaces) and all their devices for the current user
@@ -382,8 +351,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 		const target = outlets.find((o) => o.id === outletId);
 		if (!target) return;
 
-		// For the demo device, sync with backend using the outlet's DB id
-		if (selectedDeviceId === DEMO_DEVICE_ID && target.dbId) {
+		if (target.dbId) {
 			const nextPower = !target.powerOn;
 			try {
 				await updateDeviceOutletActive(target.dbId, nextPower);
@@ -464,8 +432,33 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 		}
 	};
 
-	const handleRemoveDeviceLocal = (deviceId: string) => {
-		setDevices((prev) => prev.filter((d) => d.id !== deviceId));
+	const handleDeleteDevice = (device: DeviceStrip) => {
+		Alert.alert(
+			"Delete device?",
+			`“${device.device_name}” will be permanently removed. This cannot be undone.`,
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Delete",
+					style: "destructive",
+					onPress: async () => {
+						try {
+							setLoading(true);
+							await deleteDevice(device.id);
+							setDevices((prev) => prev.filter((d) => d.id !== device.id));
+							if (selectedDeviceId === device.id) {
+								setSelectedDeviceId(null);
+								setView("devices");
+							}
+						} catch {
+							setError("Failed to delete device");
+						} finally {
+							setLoading(false);
+						}
+					},
+				},
+			],
+		);
 	};
 
 	const handleInviteMember = async () => {
@@ -575,15 +568,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 
 						<View style={styles.outletsWrap}>
 							<Text style={styles.sectionTitle}>Power Outlets</Text>
-							{outlets.map((outlet) => (
-								<OutletCard
-									key={outlet.id}
-									outlet={outlet}
-									onPowerToggle={() => handlePowerToggle(outlet.id)}
-									onRename={(name) => handleRenameOutlet(outlet.id, name)}
-									powerDisabled={!canControlPower(getMyRoleInWorkspace(selectedDevice.workspace_id))}
-								/>
-							))}
+							{outlets.length === 0 ? (
+								<Text className="text-slate-500 text-sm px-1 py-2">No outlets for this device yet.</Text>
+							) : (
+								outlets.map((outlet) => (
+									<OutletCard
+										key={outlet.dbId ?? outlet.id}
+										outlet={outlet}
+										onPowerToggle={() => handlePowerToggle(outlet.id)}
+										onRename={(name) => handleRenameOutlet(outlet.id, name)}
+										powerDisabled={!canControlPower(getMyRoleInWorkspace(selectedDevice.workspace_id))}
+									/>
+								))
+							)}
 						</View>
 					</View>
 				</ScrollView>
@@ -832,7 +829,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 											lastSeenAt={d.last_seen_at ?? undefined}
 											outletsCount={4 + (index % 3) * 2}
 											powerUsageW={index % 2 === 0 ? 145 + index * 12 : undefined}
-											onDelete={() => handleRemoveDeviceLocal(d.id)}
+											onDelete={
+												showAddDevice ? () => handleDeleteDevice(d) : undefined
+											}
 											onOpen={() => openDeviceDetail(d.id)}
 										/>
 									))}
