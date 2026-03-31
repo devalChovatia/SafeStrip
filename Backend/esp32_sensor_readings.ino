@@ -13,14 +13,13 @@ const int waterPin = 34;
 const int gasPin = 32;
 const int tempPin = 33;
 const int currentPin = 35;  // Change this if your current sensor uses a different pin
-const int humidityPin = 36;  // Change this if your current sensor uses a different pin
 
-const int waterThreshold = 3000;  // analog below this = water detected (adjust as needed)
-const int gasThreshold = 1000;
-const int overheatThreshold = 300;
+const int waterThreshold = 3000;        // analog below this = water detected
+const int smokeThreshold = 1000;        // placeholder threshold for MQ-2
+const float overheatThreshold = 60.0;   // LM35 threshold in °C
+const int currentRawThreshold = 2600;   // placeholder raw ADC threshold
+const bool demoOverCurrent = false;     // set to true during demo if needed
 
-const float currentThreshold = 5.0;  // Placeholder current threshold in Amps
-const float humidityThreshold = 60.0;  // Placeholder current threshold in Amps
 
 
 
@@ -49,25 +48,14 @@ void loop() {
     Serial.println("Dry");
   }
 
-//    // -------- GAS SENSOR --------
-//   int gasValue = analogRead(gasPin);
-//   bool gasDetected = (gasValue > gasThreshold);
-//
-//   Serial.print("Gas analog value: ");
-//   Serial.println(gasValue);
-//   if (gasDetected) {
-//     Serial.println("Gas detected");
-//   } else {
-//     Serial.println("No gas Detected");
-//   }
   // -------- SMOKE SENSOR --------
   // Read analog value from the smoke sensor
   // The backend supports "smoke" instead of "gas"
-  int gasValue = analogRead(gasPin);
-  bool smokeDetected = (gasValue > smokeThreshold);
+  int smokeValue = analogRead(gasPin);
+  bool smokeDetected = (smokeValue > smokeThreshold);
 
   Serial.print("Smoke analog value: ");
-  Serial.println(gasValue);
+  Serial.println(smokeValue);
   if (smokeDetected) {
     Serial.println("Smoke detected");
   } else {
@@ -76,12 +64,10 @@ void loop() {
 
   // -------- TEMP SENSOR --------
 
-   int tempRaw = analogRead(tempPin);
-   float temperatureC = (tempRaw / 4095.0) * 100.0;   // depend on the model of temp sensor we have
-  int tempValue =analogRead(tempPin);
-  float temperatureC =(tempValue / 4095.0) * 100.0; 
-  bool overheatDetected = (tempValue > overheatThreshold);
-
+int tempValue = analogRead(tempPin);
+float voltage = (tempValue / 4095.0) * 3.3;
+float temperatureC = voltage * 100.0;   // LM35 = 10mV/°C
+bool overheatDetected = (temperatureC > overheatThreshold);
 
 
   Serial.print("Temperature raw value: ");
@@ -95,45 +81,29 @@ void loop() {
     Serial.println("Temperature normal");
   }
 
-   // -------- CURRENT SENSOR --------
-  // Read analog value from the current sensor
-  int currentValue = analogRead(currentPin);
+// -------- CURRENT SENSOR --------
+// Temporary demo version using raw ADC values only
+int currentValue = analogRead(currentPin);
+float currentVoltage = (currentValue / 4095.0) * 3.3;
 
-  // Placeholder conversion from raw ADC value to current in Amps
-  // Update this formula later according to your actual sensor model
-  float currentA = (currentValue / 4095.0) * 10.0;
-  bool overCurrentDetected = (currentA > currentThreshold);
+// Safe demo logic:
+// - normal mode: compare raw ADC against threshold
+// - demo mode: force over-current alert without dangerous testing
+bool overCurrentDetected = demoOverCurrent || (currentValue > currentRawThreshold);
 
-  Serial.print("Current raw value: ");
-  Serial.println(currentValue);
-  Serial.print("Current A: ");
-  Serial.println(currentA);
+Serial.print("Current raw value: ");
+Serial.println(currentValue);
+Serial.print("Current voltage: ");
+Serial.println(currentVoltage);
+Serial.print("Over-current detected: ");
+Serial.println(overCurrentDetected ? "YES" : "NO");
 
-  if (overCurrentDetected) {
-    Serial.println("Over-current detected");
-  } else {
-    Serial.println("Current normal");
-  }
+if (overCurrentDetected) {
+  Serial.println("Over-current detected");
+} else {
+  Serial.println("Current normal");
+}
 
-  // -------- HUMIDITY SENSOR --------
-  // Read analog value from the humidity sensor
-  int humidityValue = analogRead(humidityPin);
-
-  // Placeholder conversion from raw ADC value to humidity percentage
-  // Update this formula later according to your actual sensor model
-  float humidityPercent = (humidityValue / 4095.0) * 100.0;
-  bool highHumidityDetected = (humidityPercent > humidityThreshold);
-
-  Serial.print("Humidity raw value: ");
-  Serial.println(humidityValue);
-  Serial.print("Humidity %: ");
-  Serial.println(humidityPercent);
-
-  if (highHumidityDetected) {
-    Serial.println("High humidity detected");
-  } else {
-    Serial.println("Humidity normal");
-  }
 
 
 
@@ -160,28 +130,6 @@ void loop() {
     http.end();
 
 
-
-
-
-    // GAS JSON: TODO
-    // HTTPClient httpGas;
-
-    // String gasJson = String("{") +
-    //   String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + "," +
-    //   String(q) + "sensor_type" + String(q) + ":" + String(q) + "gas" + String(q) + "," +
-    //   String(q) + "value" + String(q) + ":" + String(gasValue) + "," +
-    //   String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + "}";
-
-    // httpGas.begin(String(backendBaseUrl) + "/sensor-readings");
-    // httpGas.addHeader("Content-Type", "application/json");
-
-    // int gasCode = httpGas.POST(gasJson);
-
-    // Serial.print("POST gas -> ");
-    // Serial.println(gasCode);
-
-    // httpGas.end();
-
     // -------- TEMPERATURE POST --------
     HTTPClient httpTemp;
     String tempUrl = String(backendBaseUrl) + "/sensor-readings";
@@ -203,53 +151,50 @@ void loop() {
     Serial.println(tempCode);
     httpTemp.end();
 
-     // -------- CURRENT POST --------
-    HTTPClient httpCurrent;
-    String currentUrl = String(backendBaseUrl) + "/sensor-readings";
-    httpCurrent.begin(client, currentUrl);
-    httpCurrent.addHeader("Content-Type", "application/json");
+    // -------- CURRENT POST --------
+HTTPClient httpCurrent;
+String currentUrl = String(backendBaseUrl) + "/sensor-readings";
+httpCurrent.begin(currentUrl);
+httpCurrent.addHeader("Content-Type", "application/json");
 
-    // Build JSON payload for current sensor data
-    String currentJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
-                       + String(q) + "sensor_type" + String(q) + ":" + String(q) + "current" + String(q) + ","
-                       + String(q) + "value" + String(q) + ":" + String(currentA) + ","
-                       + String(q) + "unit" + String(q) + ":" + String(q) + "A" + String(q) + ","
-                       + String(q) + "raw" + String(q) + ":{"
-                       + String(q) + "currentValue" + String(q) + ":" + String(currentValue) + ","
-                       + String(q) + "currentA" + String(q) + ":" + String(currentA) + ","
-                       + String(q) + "overCurrentDetected" + String(q) + ":" + (overCurrentDetected ? "true" : "false") + ","
-                       + String(q) + "threshold" + String(q) + ":" + String(currentThreshold)
-                       + "}}";
+// Build JSON payload for current sensor data
+String currentJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                   + String(q) + "sensor_type" + String(q) + ":" + String(q) + "current" + String(q) + ","
+                   + String(q) + "value" + String(q) + ":" + String(currentValue) + ","
+                   + String(q) + "unit" + String(q) + ":" + String(q) + "raw_adc" + String(q) + ","
+                   + String(q) + "raw" + String(q) + ":{"
+                   + String(q) + "currentValue" + String(q) + ":" + String(currentValue) + ","
+                   + String(q) + "currentVoltage" + String(q) + ":" + String(currentVoltage) + ","
+                   + String(q) + "overCurrentDetected" + String(q) + ":" + (overCurrentDetected ? "true" : "false") + ","
+                   + String(q) + "threshold" + String(q) + ":" + String(currentRawThreshold)
+                   + "}}";
 
-    int currentCode = httpCurrent.POST(currentJson);
-    Serial.print("POST /sensor-readings (current) -> ");
-    Serial.println(currentCode);
-    Serial.println(httpCurrent.getString());
-    httpCurrent.end();
+int currentCode = httpCurrent.POST(currentJson);
+Serial.print("POST /sensor-readings (current) -> ");
+Serial.println(currentCode);
+Serial.println(httpCurrent.getString());
+httpCurrent.end();
 
-    // -------- HUMIDITY POST --------
-    HTTPClient httpHumidity;
-    String humidityUrl = String(backendBaseUrl) + "/sensor-readings";
-    httpHumidity.begin(client, humidityUrl);
-    httpHumidity.addHeader("Content-Type", "application/json");
 
-    // Build JSON payload for humidity sensor data
-    String humidityJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
-                        + String(q) + "sensor_type" + String(q) + ":" + String(q) + "humidity" + String(q) + ","
-                        + String(q) + "value" + String(q) + ":" + String(humidityPercent) + ","
-                        + String(q) + "unit" + String(q) + ":" + String(q) + "%" + String(q) + ","
-                        + String(q) + "raw" + String(q) + ":{"
-                        + String(q) + "humidityValue" + String(q) + ":" + String(humidityValue) + ","
-                        + String(q) + "humidityPercent" + String(q) + ":" + String(humidityPercent) + ","
-                        + String(q) + "highHumidityDetected" + String(q) + ":" + (highHumidityDetected ? "true" : "false") + ","
-                        + String(q) + "threshold" + String(q) + ":" + String(humidityThreshold)
-                        + "}}";
+ // -------- SMOKE POST --------
+    HTTPClient httpSmoke;
+    String smokeUrl = String(backendBaseUrl) + "/sensor-readings";
+    httpSmoke.begin(smokeUrl);
+    httpSmoke.addHeader("Content-Type", "application/json");
 
-    int humidityCode = httpHumidity.POST(humidityJson);
-    Serial.print("POST /sensor-readings (humidity) -> ");
-    Serial.println(humidityCode);
-    Serial.println(httpHumidity.getString());
-    httpHumidity.end();
+    String smokeJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                    + String(q) + "sensor_type" + String(q) + ":" + String(q) + "smoke" + String(q) + ","
+                    + String(q) + "value" + String(q) + ":" + String(smokeValue) + ","
+                    + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
+                    + String(q) + "raw" + String(q) + ":{"
+                    + String(q) + "smokeDetected" + String(q) + ":" + (smokeDetected ? "true" : "false") + ","
+                    + String(q) + "threshold" + String(q) + ":" + String(smokeThreshold) + "}}";
+
+    int smokeCode = httpSmoke.POST(smokeJson);
+    Serial.print("POST /sensor-readings (smoke) -> ");
+    Serial.println(smokeCode);
+    httpSmoke.end();
+
 
 
 
