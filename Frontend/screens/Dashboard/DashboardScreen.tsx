@@ -19,7 +19,15 @@ import { OutletCard } from "./components/OutletCard";
 import DeviceCard from "./components/DeviceCard";
 import { Card } from "@/components/ui/card";
 import { Button, ButtonText } from "@/components/ui/button";
-import { fetchLatestWaterReading } from "@/services/api/sensorReadingsApi";
+import {
+	fetchLatestAllSensorReadings,
+	type SensorReading,
+} from "@/services/api/sensorReadingsApi";
+import {
+	deviceSensorFieldsFromReadings,
+	partialOutletFromSensorPayload,
+	type SensorTypeKey,
+} from "@/services/sensorReadingsUtils";
 import {
 	fetchDeviceOutletsForDevice,
 	updateDeviceOutletActive,
@@ -46,10 +54,15 @@ interface Outlet {
 	dbId?: string;
 	name: string;
 	powerOn: boolean;
-	temperature: number;
-	current: number;
+	temperature: number | null;
+	current: number | null;
+	currentUnit: string;
+	smokeValue: number | null;
+	smokeUnit: string;
 	smokeDetected: boolean;
 	waterDetected: boolean;
+	overheatWarning: boolean;
+	currentWarning: boolean;
 }
 
 type DashboardView = "devices" | "deviceDetail";
@@ -57,12 +70,6 @@ type RoomsTab = "my" | "shared";
 
 interface DashboardScreenProps {
 	onOpenSettings?: () => void;
-}
-
-function waterDetectedFromReading(reading: { value?: unknown; raw?: unknown }): boolean {
-	const raw = reading.raw as { waterDetected?: boolean } | null | undefined;
-	if (raw && typeof raw.waterDetected === "boolean") return raw.waterDetected;
-	return Number(reading.value ?? 0) > 0;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings }) => {
@@ -110,12 +117,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 				const apiOutlets = await fetchDeviceOutletsForDevice(selectedDeviceId);
 				if (cancelled) return;
 
-				let waterOnFirstOutlet = false;
+				let sensorFields: ReturnType<typeof deviceSensorFieldsFromReadings> | null = null;
 				try {
-					const reading = await fetchLatestWaterReading(selectedDeviceId);
-					if (reading) waterOnFirstOutlet = waterDetectedFromReading(reading);
-				} catch {
-					// optional sensor
+					const latest = await fetchLatestAllSensorReadings(selectedDeviceId);
+					sensorFields = deviceSensorFieldsFromReadings(
+						latest.readings as Partial<Record<SensorTypeKey, SensorReading | null>>,
+					);
+				} catch (e) {
+					if (__DEV__) {
+						console.warn("[Dashboard] fetchLatestAllSensorReadings failed:", e);
+					}
+					sensorFields = deviceSensorFieldsFromReadings({});
 				}
 
 				setOutlets(
@@ -124,10 +136,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 						dbId: o.id,
 						name: o.outlet_name,
 						powerOn: o.is_active,
-						temperature: 24,
-						current: 0,
-						smokeDetected: false,
-						waterDetected: index === 0 ? waterOnFirstOutlet : false,
+						...(sensorFields ?? deviceSensorFieldsFromReadings({})),
 					})),
 				);
 				setLastUpdate(new Date());
@@ -172,24 +181,25 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 							dbId: id,
 							name: outlet_name ?? "Outlet",
 							powerOn: is_active,
-							temperature: 24,
-							current: 0,
+							temperature: null,
+							current: null,
+							currentUnit: "A",
+							smokeValue: null,
+							smokeUnit: "analog",
 							smokeDetected: false,
 							waterDetected: false,
+							overheatWarning: false,
+							currentWarning: false,
 						},
 					];
 				});
 				setLastUpdate(new Date());
 			},
-			onSensor: ({ sensor_type, value, raw }) => {
-				if (sensor_type !== "water") return;
-				const waterDetected = waterDetectedFromReading({ value, raw });
+			onSensor: (msg) => {
+				const patch = partialOutletFromSensorPayload(msg);
+				if (Object.keys(patch).length === 0) return;
 				setOutlets((prev) =>
-					prev.length === 0
-						? prev
-						: prev.map((outlet, index) =>
-								index === 0 ? { ...outlet, waterDetected } : outlet,
-							),
+					prev.length === 0 ? prev : prev.map((outlet) => ({ ...outlet, ...patch })),
 				);
 				setLastUpdate(new Date());
 			},
@@ -314,15 +324,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 	// Device/status helpers (per-device dashboard)
 	const getSystemStatus = () => {
 		const activeOutlets = outlets.filter((o) => o.powerOn);
+		const hasRisk = outlets.some((o) => o.waterDetected || o.smokeDetected);
+		const hasWarning = outlets.some((o) => o.overheatWarning || o.currentWarning);
 
-		if (activeOutlets.length === 0) {
-			return {
-				status: "All Power Off",
-				variant: "neutral" as const,
-			};
-		}
-
-		const hasRisk = activeOutlets.some((o) => o.waterDetected || o.smokeDetected);
 		if (hasRisk) {
 			return {
 				status: "⚠️ Risk Detected",
@@ -330,11 +334,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 			};
 		}
 
-		const hasWarning = activeOutlets.some((o) => o.temperature > 40 || o.current > 8);
 		if (hasWarning) {
 			return {
 				status: "⚠️ Warning",
 				variant: "warning" as const,
+			};
+		}
+
+		if (activeOutlets.length === 0) {
+			return {
+				status: "All Power Off",
+				variant: "neutral" as const,
 			};
 		}
 

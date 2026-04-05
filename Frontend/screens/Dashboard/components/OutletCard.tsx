@@ -5,10 +5,15 @@ interface Outlet {
   id: number;
   name: string;
   powerOn: boolean;
-  temperature: number;
-  current: number;
+  temperature: number | null;
+  current: number | null;
+  currentUnit: string;
+  smokeValue: number | null;
+  smokeUnit: string;
   smokeDetected: boolean;
   waterDetected: boolean;
+  overheatWarning: boolean;
+  currentWarning: boolean;
 }
 
 interface OutletCardProps {
@@ -88,7 +93,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({
   };
 
   const hasRisk = outlet.waterDetected || outlet.smokeDetected;
-  const hasWarning = outlet.temperature > 40 || outlet.current > 8;
+  const hasWarning = outlet.overheatWarning || outlet.currentWarning;
   const statePillClass = outlet.powerOn
     ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
     : 'bg-slate-100 border-slate-200 text-slate-600';
@@ -149,9 +154,19 @@ export const OutletCard: React.FC<OutletCardProps> = ({
             <SensorReading
               icon="🌡️"
               label="Temp"
-              value={outlet.powerOn ? `${outlet.temperature.toFixed(1)}°C` : '—'}
-              status={outlet.temperature > 40 ? 'danger' : outlet.temperature > 35 ? 'warning' : 'normal'}
-              disabled={!outlet.powerOn}
+              value={
+                outlet.temperature != null
+                  ? `${outlet.temperature.toFixed(1)}°C`
+                  : '—'
+              }
+              status={
+                outlet.overheatWarning
+                  ? 'danger'
+                  : outlet.temperature != null && outlet.temperature > 35
+                    ? 'warning'
+                    : 'normal'
+              }
+              disabled={false}
             />
           </View>
           
@@ -159,9 +174,21 @@ export const OutletCard: React.FC<OutletCardProps> = ({
             <SensorReading
               icon="⚡"
               label="Current"
-              value={outlet.powerOn ? `${outlet.current.toFixed(1)} A` : '—'}
-              status={outlet.current > 8 ? 'danger' : outlet.current > 6 ? 'warning' : 'normal'}
-              disabled={!outlet.powerOn}
+              value={
+                outlet.current != null
+                  ? `${outlet.current.toFixed(1)} ${outlet.currentUnit}`
+                  : '—'
+              }
+              status={
+                outlet.currentWarning
+                  ? 'danger'
+                  : outlet.current != null &&
+                      outlet.currentUnit === 'A' &&
+                      outlet.current > 6
+                    ? 'warning'
+                    : 'normal'
+              }
+              disabled={false}
             />
           </View>
           
@@ -169,9 +196,13 @@ export const OutletCard: React.FC<OutletCardProps> = ({
             <SensorReading
               icon="💨"
               label="Smoke"
-              value={outlet.powerOn ? (outlet.smokeDetected ? 'Detected' : 'Normal') : '—'}
+              value={
+                outlet.smokeValue != null
+                  ? `${outlet.smokeValue.toFixed(0)} ${outlet.smokeUnit}`
+                  : '—'
+              }
               status={outlet.smokeDetected ? 'danger' : 'normal'}
-              disabled={!outlet.powerOn}
+              disabled={false}
             />
           </View>
           
@@ -179,15 +210,15 @@ export const OutletCard: React.FC<OutletCardProps> = ({
             <SensorReading
               icon="💧"
               label="Water"
-              value={outlet.powerOn ? (outlet.waterDetected ? 'Wet' : 'Dry') : '—'}
+              value={outlet.waterDetected ? 'Wet' : 'Dry'}
               status={outlet.waterDetected ? 'danger' : 'normal'}
-              disabled={!outlet.powerOn}
+              disabled={false}
             />
           </View>
         </View>
 
         {/* Alerts */}
-        {outlet.powerOn && hasRisk && (
+        {hasRisk && (
           <View className="mt-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
             <Text className="text-xs font-semibold text-red-700">
               ⚠️ Risk detected - turn off power immediately
@@ -195,7 +226,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({
           </View>
         )}
         
-        {outlet.powerOn && !hasRisk && hasWarning && (
+        {!hasRisk && hasWarning && (
           <View className="mt-4 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg">
             <Text className="text-xs font-semibold text-yellow-700">
               ⚠️ Elevated readings detected

@@ -7,7 +7,12 @@ if (typeof global !== "undefined" && !(global as { Buffer?: unknown }).Buffer) {
 
 export type DashboardMqttHandlers = {
 	onOutlet?: (msg: { id: string; is_active: boolean; outlet_name?: string }) => void;
-	onSensor?: (msg: { sensor_type: string; value?: unknown; raw?: unknown }) => void;
+	onSensor?: (msg: {
+		sensor_type: string;
+		value?: unknown;
+		raw?: unknown;
+		unit?: unknown;
+	}) => void;
 };
 
 /**
@@ -54,6 +59,7 @@ export function subscribeDeviceDashboard(deviceId: string, handlers: DashboardMq
 				sensor_type?: string;
 				value?: unknown;
 				raw?: unknown;
+				unit?: unknown;
 			};
 			if (msg.ev === "outlet" && msg.id != null && typeof msg.is_active === "boolean") {
 				handlers.onOutlet?.({
@@ -66,6 +72,7 @@ export function subscribeDeviceDashboard(deviceId: string, handlers: DashboardMq
 					sensor_type: msg.sensor_type,
 					value: msg.value,
 					raw: msg.raw,
+					unit: msg.unit,
 				});
 			}
 		} catch {
