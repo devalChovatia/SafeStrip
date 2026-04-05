@@ -1,127 +1,141 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <Wire.h>
 #include <Adafruit_ADS1X15.h>
+#include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-// ==========================
-// WiFi + Backend Config
-// ==========================
 const char* ssid = "BELL508";
 const char* password = "493692461512";
 const char* backendBaseUrl = "https://safestrip.onrender.com";
+const char* deviceId = "69b69aa2-9177-438a-bab7-cb4f5da4a82e";
 
-// Sensor-reporting device ID
-const char* sensorDeviceId = "69b69aa2-9177-438a-bab7-cb4f5da4a82e";
+// MQTT
+const char* MQTT_HOST     = "79780ac7a4fb4da9bc0a6c5224fbb0cd.s1.eu.hivemq.cloud";
+const uint16_t MQTT_PORT  = 8883;
+const char* MQTT_USER     = "safestrip-local";
+const char* MQTT_PASS     = "Safestrip123";
 
-// Relay-control device ID
 const char* relayDeviceId = "b2c3bd18-1fd6-4a85-b7c5-20e830f86859";
-
-// Outlet IDs from backend
 const char* OUTLET_1_ID = "4c55bc13-ad02-4975-abc7-0b38961eb858";
 const char* OUTLET_2_ID = "d1be7829-615d-454e-a84b-1edc63515bab";
+#outletid
+const char* OUTLET_3_ID = "PUT_OUTLET_3_ID_HERE";
+const char* OUTLET_4_ID = "PUT_OUTLET_4_ID_HERE";
 
-// Add these only if your backend actually has outlet 3 and 4
-const char* OUTLET_3_ID = "";
-const char* OUTLET_4_ID = "";
-
-// ==========================
-// Sensor Pins
-// ==========================
 const int waterPin = 34;
-const int gasPin   = 32;
-const int tempPin  = 33;
+const int gasPin = 32;
+const int tempPin = 33;
 
-// ==========================
-// Relay Pins
-// ==========================
-#define RELAY1_PIN 13
-#define RELAY2_PIN 12
-#define RELAY3_PIN 14
-#define RELAY4_PIN 25
+// Relay pins
+#define RELAY_PIN   12
+#define RELAY_PIN_2 13
+#define RELAY_PIN_3 14
+#define RELAY_PIN_4 25
 
-// ==========================
-// ADS1115
-// ==========================
+// ADS1115 object
 Adafruit_ADS1115 ads;
 
-// ==========================
-// Thresholds
-// ==========================
+WiFiClientSecure wifiTls;
+PubSubClient mqtt(wifiTls);
+
+bool outlet1Active = false;
+bool outlet2Active = false;
+bool outlet3Active = false;
+bool outlet4Active = false;
+
 const int waterThreshold = 3000;
 const int smokeThreshold = 1000;
-const float overheatThreshold = 35.0;
-const int currentRawThreshold = 200;
+const float overheatThreshold = 35.0; //change to raw value above 400
+
+// Placeholder threshold for current from ADS1115
+const int currentRawThreshold = 200;   // adjust after testing
 const bool demoOverCurrent = false;
 
-// ==========================
-// Timing
-// ==========================
-const unsigned long SENSOR_UPLOAD_INTERVAL_MS = 5000;
-const unsigned long RELAY_POLL_INTERVAL_MS    = 3000;
+void applyRelayStates() {
+  digitalWrite(RELAY_PIN,   outlet1Active ? LOW : HIGH);
+  digitalWrite(RELAY_PIN_2, outlet2Active ? LOW : HIGH);
+  digitalWrite(RELAY_PIN_3, outlet3Active ? LOW : HIGH);
+  digitalWrite(RELAY_PIN_4, outlet4Active ? LOW : HIGH);
+}
 
-unsigned long lastSensorUpload = 0;
-unsigned long lastRelayPoll = 0;
+void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+  (void)topic;
+  if (length == 0 || length > 512) return;
 
-// ==========================
-// WiFi Connect
-// ==========================
-void connectWiFi() {
-  if (WiFi.status() == WL_CONNECTED) return;
+  char buf[512];
+  memcpy(buf, payload, length);
+  buf[length] = '\0';
 
-  Serial.print("Connecting to WiFi");
-  WiFi.begin(ssid, password);
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, buf)) return;
 
-  unsigned long startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
-    delay(500);
-    Serial.print(".");
-  }
+  const char* ev = doc["ev"];
+  if (!ev || strcmp(ev, "outlet") != 0) return;
 
-  Serial.println();
+  const char* id = doc["id"];
+  if (!id) return;
+  bool is_active = doc["is_active"] | false;
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("WiFi connected");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
+  if (strcmp(id, OUTLET_1_ID) == 0) {
+    outlet1Active = is_active;
+  } else if (strcmp(id, OUTLET_2_ID) == 0) {
+    outlet2Active = is_active;
+  } else if (strcmp(id, OUTLET_3_ID) == 0) {
+    outlet3Active = is_active;
+  } else if (strcmp(id, OUTLET_4_ID) == 0) {
+    outlet4Active = is_active;
   } else {
-    Serial.println("WiFi connection failed");
+    return;
   }
+
+  applyRelayStates();
+  Serial.print("Outlet MQTT: ");
+  Serial.print(id);
+  Serial.print(" -> ");
+  Serial.println(is_active ? "ON" : "OFF");
 }
 
-// ==========================
-// Relay Helpers
-// ==========================
-// Active LOW relays:
-// LOW  = ON
-// HIGH = OFF
+bool connectMqtt() {
+  String topic = String("safestrip/device/") + relayDeviceId + "/dashboard";
+  wifiTls.setInsecure();
 
-void setAllRelaysOff() {
-  digitalWrite(RELAY1_PIN, HIGH);
-  digitalWrite(RELAY2_PIN, HIGH);
-  digitalWrite(RELAY3_PIN, HIGH);
-  digitalWrite(RELAY4_PIN, HIGH);
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setCallback(onMqttMessage);
+  mqtt.setBufferSize(512);
+
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  char clientId[28];
+  snprintf(clientId, sizeof(clientId), "safestrip-%02x%02x%02x%02x",
+           mac[2], mac[3], mac[4], mac[5]);
+
+  if (!mqtt.connect(clientId, MQTT_USER, MQTT_PASS)) {
+    Serial.print("MQTT connect failed, state=");
+    Serial.println(mqtt.state());
+    return false;
+  }
+
+  if (!mqtt.subscribe(topic.c_str())) {
+    Serial.println("MQTT subscribe failed");
+    mqtt.disconnect();
+    return false;
+  }
+
+  Serial.println("MQTT connected & subscribed");
+  return true;
 }
 
-void applyRelayStates(bool outlet1Active, bool outlet2Active, bool outlet3Active, bool outlet4Active) {
-  digitalWrite(RELAY1_PIN, outlet1Active ? LOW : HIGH);
-  digitalWrite(RELAY2_PIN, outlet2Active ? LOW : HIGH);
-  digitalWrite(RELAY3_PIN, outlet3Active ? LOW : HIGH);
-  digitalWrite(RELAY4_PIN, outlet4Active ? LOW : HIGH);
-}
-
-// Fetches outlet states from backend.
-// If you only have 2 outlets in backend, relay 3 and 4 stay OFF.
-bool fetchOutletsForDevice(bool& outlet1Active, bool& outlet2Active, bool& outlet3Active, bool& outlet4Active) {
+/** Single GET at boot so relays match DB before any new MQTT messages (optional). */
+bool syncOutletsFromHttpOnce() {
   String url = String(backendBaseUrl) + "/api/device-outlets?device_id=" + relayDeviceId;
-
   HTTPClient http;
   http.begin(url);
-
-  int httpCode = http.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    Serial.print("Relay fetch HTTP error: ");
-    Serial.println(httpCode);
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    Serial.print("Boot HTTP sync failed: ");
+    Serial.println(code);
     http.end();
     return false;
   }
@@ -130,121 +144,108 @@ bool fetchOutletsForDevice(bool& outlet1Active, bool& outlet2Active, bool& outle
   http.end();
 
   StaticJsonDocument<1024> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-  if (err) {
-    Serial.print("Relay JSON error: ");
-    Serial.println(err.c_str());
-    return false;
-  }
+  if (deserializeJson(doc, payload) || !doc.is<JsonArray>()) return false;
 
-  if (!doc.is<JsonArray>()) {
-    Serial.println("Relay response is not a JSON array");
-    return false;
-  }
-
-  JsonArray arr = doc.as<JsonArray>();
-
-  bool found1 = false;
-  bool found2 = false;
-  bool found3 = false;
-  bool found4 = false;
-
-  // defaults
-  outlet1Active = false;
-  outlet2Active = false;
-  outlet3Active = false;
-  outlet4Active = false;
-
-  for (JsonObject obj : arr) {
+  bool found1 = false, found2 = false, found3 = false, found4 = false;
+  for (JsonObject obj : doc.as<JsonArray>()) {
     const char* id = obj["id"];
+    if (!id) continue;
     bool is_active = obj["is_active"] | false;
 
-    if (!id) continue;
-
-    if (strlen(OUTLET_1_ID) > 0 && strcmp(id, OUTLET_1_ID) == 0) {
+    if (strcmp(id, OUTLET_1_ID) == 0) {
       outlet1Active = is_active;
       found1 = true;
-    } 
-    else if (strlen(OUTLET_2_ID) > 0 && strcmp(id, OUTLET_2_ID) == 0) {
+    } else if (strcmp(id, OUTLET_2_ID) == 0) {
       outlet2Active = is_active;
       found2 = true;
-    }
-    else if (strlen(OUTLET_3_ID) > 0 && strcmp(id, OUTLET_3_ID) == 0) {
+    } else if (strcmp(id, OUTLET_3_ID) == 0) {
       outlet3Active = is_active;
       found3 = true;
-    }
-    else if (strlen(OUTLET_4_ID) > 0 && strcmp(id, OUTLET_4_ID) == 0) {
+    } else if (strcmp(id, OUTLET_4_ID) == 0) {
       outlet4Active = is_active;
       found4 = true;
     }
   }
 
-  // If outlet 3 and 4 IDs are blank, that's okay.
-  bool outlet3Configured = strlen(OUTLET_3_ID) > 0;
-  bool outlet4Configured = strlen(OUTLET_4_ID) > 0;
-
-  if (!found1 || !found2) {
-    Serial.println("Did not find outlet 1 and/or outlet 2 in response");
+  if (found1 && found2 && found3 && found4) {
+    applyRelayStates();
+    Serial.println("Boot: synced relays from HTTP");
   }
-
-  if (outlet3Configured && !found3) {
-    Serial.println("Did not find outlet 3 in response");
-  }
-
-  if (outlet4Configured && !found4) {
-    Serial.println("Did not find outlet 4 in response");
-  }
-
-  return found1 && found2 && (!outlet3Configured || found3) && (!outlet4Configured || found4);
+  return found1 && found2 && found3 && found4;
 }
 
-// ==========================
-// POST Helper
-// ==========================
-void postSensorReading(const String& sensorType, const String& value, const String& unit, const String& rawJson) {
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("hello");
+
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(RELAY_PIN_2, OUTPUT);
+  pinMode(RELAY_PIN_3, OUTPUT);
+  pinMode(RELAY_PIN_4, OUTPUT);
+
+  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(RELAY_PIN_2, HIGH);
+  digitalWrite(RELAY_PIN_3, HIGH);
+  digitalWrite(RELAY_PIN_4, HIGH);
+
+  // Custom I2C pins
+  Wire.begin(26, 27);
+  delay(100);
+
+  Serial.println("Scanning I2C...");
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("Found device at 0x");
+      Serial.println(addr, HEX);
+    }
+  }
+
+  if (!ads.begin(0x48, &Wire)) {
+    Serial.println("Failed to initialize ADS1115!");
+    while (1);
+  }
+
+  ads.setGain(GAIN_TWOTHIRDS);
+
+  Serial.println("ADS1115 initialized.");
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected!");
+
+  syncOutletsFromHttpOnce();
+
+  if (!connectMqtt()) {
+    Serial.println("Will retry MQTT in loop");
+  }
+}
+
+void loop() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected, skipping upload.");
+    delay(500);
     return;
   }
 
-  HTTPClient http;
-  String url = String(backendBaseUrl) + "/sensor-readings";
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-
-  String json = "{";
-  json += "\"device_id\":\"" + String(sensorDeviceId) + "\",";
-  json += "\"sensor_type\":\"" + sensorType + "\",";
-  json += "\"value\":" + value + ",";
-  json += "\"unit\":\"" + unit + "\",";
-  json += "\"raw\":" + rawJson;
-  json += "}";
-
-  int httpCode = http.POST(json);
-
-  Serial.print("POST /sensor-readings (");
-  Serial.print(sensorType);
-  Serial.print(") -> ");
-  Serial.println(httpCode);
-
-  String response = http.getString();
-  if (response.length() > 0) {
-    Serial.println(response);
+  if (!mqtt.connected()) {
+    delay(1000);
+    connectMqtt();
+  } else {
+    mqtt.loop();
   }
 
-  http.end();
-}
-
-// ==========================
-// Sensor Read + Upload
-// ==========================
-void readAndUploadSensors() {
   // -------- WATER SENSOR --------
-  int waterValue = analogRead(waterPin);
-  bool waterDetected = (waterValue < waterThreshold);
+  int value = analogRead(waterPin);
+  bool waterDetected = (value < waterThreshold);
 
   Serial.print("Water Analog value: ");
-  Serial.println(waterValue);
+  Serial.println(value);
   Serial.println(waterDetected ? "Water detected" : "Dry");
 
   // -------- SMOKE SENSOR --------
@@ -257,8 +258,8 @@ void readAndUploadSensors() {
 
   // -------- TEMP SENSOR --------
   int tempValue = analogRead(tempPin);
-  float voltage = (tempValue / 4095.0f) * 3.3f;
-  float temperatureC = voltage * 100.0f;   // LM35 = 10mV/°C
+  float voltage = (tempValue / 4095.0) * 3.3;
+  float temperatureC = voltage * 100.0;   // LM35 = 10mV/°C
   bool overheatDetected = (temperatureC > overheatThreshold);
 
   Serial.print("Temperature raw value: ");
@@ -280,6 +281,7 @@ void readAndUploadSensors() {
   float minVoltage = minVal * 0.1875f / 1000.0f;
   float maxVoltage = maxVal * 0.1875f / 1000.0f;
 
+  // use the signal swing as your "current activity" value
   int16_t currentValue = maxVal - minVal;
   float currentVoltage = maxVoltage - minVoltage;
 
@@ -304,123 +306,123 @@ void readAndUploadSensors() {
 
   Serial.println("-----------------------------");
 
-  // -------- Upload water --------
-  postSensorReading(
-    "water",
-    String(waterValue),
-    "analog",
-    String("{\"waterDetected\":") + (waterDetected ? "true" : "false") + "}"
-  );
+  if (WiFi.status() == WL_CONNECTED) {
+    char q = char(34);
 
-  // -------- Upload temp --------
-  postSensorReading(
-    "temp",
-    String(temperatureC, 2),
-    "C",
-    String("{\"tempValue\":") + tempValue +
-    ",\"temperatureC\":" + String(temperatureC, 2) +
-    ",\"overheatDetected\":" + (overheatDetected ? "true" : "false") +
-    ",\"threshold\":" + String(overheatThreshold, 2) + "}"
-  );
+    // -------- WATER POST --------
+    HTTPClient http;
+    String url = String(backendBaseUrl) + "/sensor-readings";
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
 
-  // -------- Upload current --------
-  postSensorReading(
-    "current",
-    String(currentValue),
-    "ads_raw",
-    String("{\"currentValue\":") + currentValue +
-    ",\"currentVoltage\":" + String(currentVoltage, 4) +
-    ",\"overCurrentDetected\":" + (overCurrentDetected ? "true" : "false") +
-    ",\"threshold\":" + String(currentRawThreshold) + "}"
-  );
+    String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                  + String(q) + "sensor_type" + String(q) + ":" + String(q) + "water" + String(q) + ","
+                  + String(q) + "value" + String(q) + ":" + String(value) + ","
+                  + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
+                  + String(q) + "raw" + String(q) + ":{" + String(q) + "waterDetected" + String(q) + ":"
+                  + (waterDetected ? "true" : "false") + "}}";
 
-  // -------- Upload smoke --------
-  postSensorReading(
-    "smoke",
-    String(smokeValue),
-    "analog",
-    String("{\"smokeDetected\":") + (smokeDetected ? "true" : "false") +
-    ",\"threshold\":" + String(smokeThreshold) + "}"
-  );
+    int httpCode = http.POST(json);
+    Serial.print("POST /sensor-readings (water) -> ");
+    Serial.println(httpCode);
+    http.end();
+
+    // -------- TEMPERATURE POST --------
+    HTTPClient httpTemp;
+    String tempUrl = String(backendBaseUrl) + "/sensor-readings";
+    httpTemp.begin(tempUrl);
+    httpTemp.addHeader("Content-Type", "application/json");
+
+    String tempJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                    + String(q) + "sensor_type" + String(q) + ":" + String(q) + "temp" + String(q) + ","
+                    + String(q) + "value" + String(q) + ":" + String(temperatureC) + ","
+                    + String(q) + "unit" + String(q) + ":" + String(q) + "C" + String(q) + ","
+                    + String(q) + "raw" + String(q) + ":{"
+                    + String(q) + "tempValue" + String(q) + ":" + String(tempValue) + ","
+                    + String(q) + "temperatureC" + String(q) + ":" + String(temperatureC) + ","
+                    + String(q) + "overheatDetected" + String(q) + ":" + (overheatDetected ? "true" : "false") + ","
+                    + String(q) + "threshold" + String(q) + ":" + String(overheatThreshold) + "}}";
+
+    int tempCode = httpTemp.POST(tempJson);
+    Serial.print("POST /sensor-readings (temp) -> ");
+    Serial.println(tempCode);
+    httpTemp.end();
+
+    // -------- CURRENT POST --------
+    HTTPClient httpCurrent;
+    String currentUrl = String(backendBaseUrl) + "/sensor-readings";
+    httpCurrent.begin(currentUrl);
+    httpCurrent.addHeader("Content-Type", "application/json");
+
+    String currentJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                       + String(q) + "sensor_type" + String(q) + ":" + String(q) + "current" + String(q) + ","
+                       + String(q) + "value" + String(q) + ":" + String(currentValue) + ","
+                       + String(q) + "unit" + String(q) + ":" + String(q) + "ads_raw" + String(q) + ","
+                       + String(q) + "raw" + String(q) + ":{"
+                       + String(q) + "currentValue" + String(q) + ":" + String(currentValue) + ","
+                       + String(q) + "currentVoltage" + String(q) + ":" + String(currentVoltage, 4) + ","
+                       + String(q) + "overCurrentDetected" + String(q) + ":" + (overCurrentDetected ? "true" : "false") + ","
+                       + String(q) + "threshold" + String(q) + ":" + String(currentRawThreshold)
+                       + "}}";
+
+    int currentCode = httpCurrent.POST(currentJson);
+    Serial.print("POST /sensor-readings (current) -> ");
+    Serial.println(currentCode);
+    Serial.println(httpCurrent.getString());
+    httpCurrent.end();
+
+    // -------- SMOKE POST --------
+    HTTPClient httpSmoke;
+    String smokeUrl = String(backendBaseUrl) + "/sensor-readings";
+    httpSmoke.begin(smokeUrl);
+    httpSmoke.addHeader("Content-Type", "application/json");
+
+    String smokeJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                    + String(q) + "sensor_type" + String(q) + ":" + String(q) + "smoke" + String(q) + ","
+                    + String(q) + "value" + String(q) + ":" + String(smokeValue) + ","
+                    + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
+                    + String(q) + "raw" + String(q) + ":{"
+                    + String(q) + "smokeDetected" + String(q) + ":" + (smokeDetected ? "true" : "false") + ","
+                    + String(q) + "threshold" + String(q) + ":" + String(smokeThreshold) + "}}";
+
+    int smokeCode = httpSmoke.POST(smokeJson);
+    Serial.print("POST /sensor-readings (smoke) -> ");
+    Serial.println(smokeCode);
+    httpSmoke.end();
+
+  } else {
+    Serial.println("WiFi not connected, skipping upload.");
+  }
+
+  delay(5000);
 }
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("Booting combined SafeStrip controller...");
+// #include <Wire.h>
 
-  // Relay init
-  pinMode(RELAY1_PIN, OUTPUT);
-  pinMode(RELAY2_PIN, OUTPUT);
-  pinMode(RELAY3_PIN, OUTPUT);
-  pinMode(RELAY4_PIN, OUTPUT);
-  setAllRelaysOff();
+// void setup() {
+//   Serial.begin(115200);
+//   delay(1000);
+//   Serial.println("I2C scan starting");
+//   Wire.begin(26, 27);
+// }
 
-  // I2C + ADS1115 init
-  Wire.begin(26, 27);
-  delay(100);
+// void loop() {
+//   int found = 0;
+//   Serial.println("Scanning...");
 
-  Serial.println("Scanning I2C...");
-  for (byte addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.print("Found device at 0x");
-      if (addr < 16) Serial.print("0");
-      Serial.println(addr, HEX);
-    }
-  }
+//   for (byte addr = 1; addr < 127; addr++) {
+//     Wire.beginTransmission(addr);
+//     if (Wire.endTransmission() == 0) {
+//       Serial.print("Found device at 0x");
+//       if (addr < 16) Serial.print("0");
+//       Serial.println(addr, HEX);
+//       found++;
+//     }
+//   }
 
-  if (!ads.begin(0x48, &Wire)) {
-    Serial.println("Failed to initialize ADS1115!");
-    while (1);
-  }
+//   if (found == 0) {
+//     Serial.println("No I2C devices found");
+//   }
 
-  ads.setGain(GAIN_TWOTHIRDS);
-  Serial.println("ADS1115 initialized.");
-
-  connectWiFi();
-}
-
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
-  }
-
-  unsigned long now = millis();
-
-  // -------- Poll relay states --------
-  if (now - lastRelayPoll >= RELAY_POLL_INTERVAL_MS) {
-    lastRelayPoll = now;
-
-    if (WiFi.status() == WL_CONNECTED) {
-      bool outlet1Active = false;
-      bool outlet2Active = false;
-      bool outlet3Active = false;
-      bool outlet4Active = false;
-
-      bool ok = fetchOutletsForDevice(outlet1Active, outlet2Active, outlet3Active, outlet4Active);
-
-      if (ok) {
-        applyRelayStates(outlet1Active, outlet2Active, outlet3Active, outlet4Active);
-
-        Serial.print("Outlet1: ");
-        Serial.print(outlet1Active);
-        Serial.print(" | Outlet2: ");
-        Serial.print(outlet2Active);
-        Serial.print(" | Outlet3: ");
-        Serial.print(outlet3Active);
-        Serial.print(" | Outlet4: ");
-        Serial.println(outlet4Active);
-      } else {
-        Serial.println("Failed to fetch outlet states");
-        // Optional: leave current states as-is
-      }
-    }
-  }
-
-  // -------- Upload sensors --------
-  if (now - lastSensorUpload >= SENSOR_UPLOAD_INTERVAL_MS) {
-    lastSensorUpload = now;
-    readAndUploadSensors();
-  }
-}
+//   delay(3000);
+// }
