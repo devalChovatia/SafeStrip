@@ -12,7 +12,7 @@ export type DashboardMqttHandlers = {
 
 /**
  * Subscribe to backend-published dashboard events.
- * Broker must expose MQTT over WebSockets for Expo (e.g. HiveMQ Cloud wss://…/mqtt).
+ * Broker must expose MQTT over WebSockets for Expo (e.g. Mosquitto ws://<host>:9001).
  * Backend uses TCP to the same broker; topic: safestrip/device/{deviceId}/dashboard
  */
 export function subscribeDeviceDashboard(deviceId: string, handlers: DashboardMqttHandlers): () => void {

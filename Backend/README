@@ -1,42 +1,57 @@
-# Use this command to initialize fastapi on local 
+# SafeStrip Backend
 
-pip install fastapi uvicorn
+## Run backend locally
 
-# To run the backend 
-
+```bash
+pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
 
-# To create database tables 
+## Mosquitto MQTT (local)
 
-fastapienv/bin/python -c "from app.database import engine; from app import models; models.Base.metadata.create_all(bind=engine)"
+This project publishes dashboard events to MQTT topic:
 
-# View all tables 
+`safestrip/device/{device_id}/dashboard`
 
-sqlite3 safestrip.db ".tables"
+### Option A: Run Mosquitto with Docker (recommended)
 
+From project root:
 
-{
-  "device_id": "<device-uuid>",
-  "sensor_type": "water | temp | smoke | current | humidity",
-  "value": 0,
-  "unit": "<unit>",
-  "raw": {}
-}
+```bash
+docker compose -f docker-compose.mosquitto.yml up -d
+```
 
-INFO:     127.0.0.1:49232 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49232 - "GET /openapi.json HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49319 - "POST /sensor-readings HTTP/1.1" 201 Created
-INFO:     127.0.0.1:49856 - "GET /sensor-readings/latest?device_id=69b69aa2-9177-438a-bab7-cb4f5da4a82e&sensor_type=water HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49997 - "POST /sensor-readings HTTP/1.1" 201 Created
-INFO:     127.0.0.1:50100 - "GET /sensor-readings/latest?device_id=69b69aa2-9177-438a-bab7-cb4f5da4a82e&sensor_type=current HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50326 - "POST /sensor-readings HTTP/1.1" 201 Created
-INFO:     127.0.0.1:50443 - "GET /sensor-readings/latest?device_id=69b69aa2-9177-438a-bab7-cb4f5da4a82e&sensor_type=smoke HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50568 - "POST /sensor-readings HTTP/1.1" 201 Created
-INFO:     127.0.0.1:50735 - "POST /sensor-readings HTTP/1.1" 201 Created
-INFO:     127.0.0.1:50766 - "GET /sensor-readings/latest?device_id=69b69aa2-9177-438a-bab7-cb4f5da4a82e&sensor_type=water HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50803 - "GET /sensor-readings/latest?device_id=69b69aa2-9177-438a-bab7-cb4f5da4a82e&sensor_type=current HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50919 - "POST /sensor-readings HTTP/1.1" 201 Created
-INFO:     127.0.0.1:50955 - "GET /sensor-readings/latest?device_id=69b69aa2-9177-438a-bab7-cb4f5da4a82e&sensor_type=humidity HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51139 - "POST /sensor-readings HTTP/1.1" 201 Created
-INFO:     127.0.0.1:51165 - "GET /sensor-readings/latest?device_id=69b69aa2-9177-438a-bab7-cb4f5da4a82e&sensor_type=temp HTTP/1.1" 200 OK
+This starts Mosquitto with:
 
+- MQTT TCP listener on port `1883` (for backend publisher)
+- MQTT WebSocket listener on port `9001` (for Expo frontend subscriber)
+
+Config file: `Backend/mosquitto/mosquitto.conf`
+
+### Backend `.env` settings for local Mosquitto
+
+```env
+MQTT_ENABLED=true
+MQTT_BROKER_HOST=127.0.0.1
+MQTT_BROKER_PORT=1883
+MQTT_TLS=false
+MQTT_CLIENT_ID=safestrip-api
+# MQTT_USERNAME=
+# MQTT_PASSWORD=
+```
+
+### Frontend `.env` settings for local Mosquitto WebSocket
+
+Use your machine IP instead of localhost when testing from a physical device:
+
+```env
+EXPO_PUBLIC_MQTT_WS_URL=ws://<YOUR_LOCAL_IP>:9001
+# EXPO_PUBLIC_MQTT_USER=
+# EXPO_PUBLIC_MQTT_PASS=
+```
+
+Example:
+
+```env
+EXPO_PUBLIC_MQTT_WS_URL=ws://192.168.2.12:9001
+```

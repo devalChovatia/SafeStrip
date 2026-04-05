@@ -1,6 +1,11 @@
 """
 Publish dashboard events to an MQTT broker (TCP).
-Set MQTT_ENABLED=true and broker env vars on Render so the app can subscribe over WSS from Expo.
+
+This module works with any MQTT broker (including Mosquitto).
+Typical local Mosquitto settings:
+  - MQTT_BROKER_HOST=127.0.0.1
+  - MQTT_BROKER_PORT=1883
+  - MQTT_TLS=false
 
 Topic: safestrip/device/{device_id}/dashboard
 Payload: JSON with "ev" == "outlet" | "sensor"
@@ -21,6 +26,18 @@ _lock = threading.Lock()
 _client: mqtt.Client | None = None
 
 
+def _on_connect(_client: mqtt.Client, _userdata: object, _flags: object, reason_code: object, _properties: object) -> None:
+    logger.info("MQTT connected (reason_code=%s)", reason_code)
+
+
+def _on_disconnect(_client: mqtt.Client, _userdata: object, disconnect_flags: object, reason_code: object, _properties: object) -> None:
+    logger.warning(
+        "MQTT disconnected (reason_code=%s, flags=%s)",
+        reason_code,
+        disconnect_flags,
+    )
+
+
 def _enabled() -> bool:
     return os.getenv("MQTT_ENABLED", "").lower() in ("1", "true", "yes")
 
@@ -32,10 +49,9 @@ def _get_client() -> mqtt.Client | None:
     with _lock:
         if _client is not None:
             return _client
-        host = os.getenv("MQTT_BROKER_HOST", "").strip()
+        host = os.getenv("MQTT_BROKER_HOST", "127.0.0.1").strip()
         if not host:
-            logger.warning("MQTT_ENABLED but MQTT_BROKER_HOST is empty; skipping MQTT")
-            return None
+            host = "127.0.0.1"
         port = int(os.getenv("MQTT_BROKER_PORT", "1883"))
         client_id = os.getenv("MQTT_CLIENT_ID", "safestrip-api")
 
@@ -43,6 +59,8 @@ def _get_client() -> mqtt.Client | None:
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=client_id,
         )
+        client.on_connect = _on_connect
+        client.on_disconnect = _on_disconnect
         user = os.getenv("MQTT_USERNAME")
         if user is not None:
             client.username_pw_set(user, os.getenv("MQTT_PASSWORD") or "")
@@ -51,6 +69,7 @@ def _get_client() -> mqtt.Client | None:
             client.tls_set()
 
         try:
+            logger.info("Connecting to MQTT broker %s:%s (tls=%s)", host, port, os.getenv("MQTT_TLS", "false"))
             client.connect_async(host, port, keepalive=60)
             client.loop_start()
         except Exception as e:
