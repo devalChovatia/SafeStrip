@@ -6,8 +6,8 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-const char* ssid = "BELL508";
-const char* password = "493692461512";
+const char* ssid = "Wajdy";
+const char* password = "helloooo";
 const char* backendBaseUrl = "https://safestrip.onrender.com";
 const char* deviceId = "69b69aa2-9177-438a-bab7-cb4f5da4a82e";
 
@@ -18,15 +18,15 @@ const char* MQTT_USER     = "safestrip-local";
 const char* MQTT_PASS     = "Safestrip123";
 
 const char* relayDeviceId = "b2c3bd18-1fd6-4a85-b7c5-20e830f86859";
-const char* OUTLET_1_ID = "4c55bc13-ad02-4975-abc7-0b38961eb858";
-const char* OUTLET_2_ID = "d1be7829-615d-454e-a84b-1edc63515bab";
-#outletid
-const char* OUTLET_3_ID = "PUT_OUTLET_3_ID_HERE";
-const char* OUTLET_4_ID = "PUT_OUTLET_4_ID_HERE";
+const char* OUTLET_1_ID   = "4c55bc13-ad02-4975-abc7-0b38961eb858";
+const char* OUTLET_2_ID   = "d1be7829-615d-454e-a84b-1edc63515bab";
+const char* OUTLET_3_ID   = "b7c9d401-63da-4c02-b902-a76086267869";
+const char* OUTLET_4_ID   = "a7028180-df37-4794-ba27-74ded6a0e96c";
 
+// Sensor pins
 const int waterPin = 34;
-const int gasPin = 32;
-const int tempPin = 33;
+const int gasPin   = 32;
+const int tempPin  = 33;
 
 // Relay pins
 #define RELAY_PIN   12
@@ -34,48 +34,109 @@ const int tempPin = 33;
 #define RELAY_PIN_3 14
 #define RELAY_PIN_4 25
 
-// ADS1115 object
+// ADS1115
 Adafruit_ADS1115 ads;
 
 WiFiClientSecure wifiTls;
 PubSubClient mqtt(wifiTls);
 
+// Relay states
 bool outlet1Active = false;
 bool outlet2Active = false;
 bool outlet3Active = false;
 bool outlet4Active = false;
 
+// Thresholds
 const int waterThreshold = 3000;
 const int smokeThreshold = 1000;
-const float overheatThreshold = 35.0; //change to raw value above 400
-
-// Placeholder threshold for current from ADS1115
-const int currentRawThreshold = 200;   // adjust after testing
+const float overheatThreshold = 35.0;
+const int currentRawThreshold = 200;
 const bool demoOverCurrent = false;
 
+// Timing
+unsigned long lastSensorPrint = 0;
+unsigned long lastUpload = 0;
+unsigned long lastMqttReconnectAttempt = 0;
+unsigned long lastRelaySync = 0;
+unsigned long lastWiFiReconnectAttempt = 0;
+
+const unsigned long sensorInterval = 1000;         // 1 sec
+const unsigned long uploadInterval = 10000;        // 10 sec
+const unsigned long mqttReconnectInterval = 3000;  // 3 sec
+const unsigned long relaySyncInterval = 5000;      // 5 sec backup sync
+const unsigned long wifiReconnectInterval = 5000;  // 5 sec
+
+// Latest sensor values
+int waterValue = 0;
+bool waterDetected = false;
+
+int smokeValue = 0;
+bool smokeDetected = false;
+
+int tempValue = 0;
+float temperatureC = 0.0;
+bool overheatDetected = false;
+
+int16_t minVal = 0;
+int16_t maxVal = 0;
+int16_t currentValue = 0;
+float currentVoltage = 0.0;
+bool overCurrentDetected = false;
+
 void applyRelayStates() {
+  // Active LOW relay board
   digitalWrite(RELAY_PIN,   outlet1Active ? LOW : HIGH);
   digitalWrite(RELAY_PIN_2, outlet2Active ? LOW : HIGH);
   digitalWrite(RELAY_PIN_3, outlet3Active ? LOW : HIGH);
   digitalWrite(RELAY_PIN_4, outlet4Active ? LOW : HIGH);
+
+  Serial.print("Relays applied -> ");
+  Serial.print("1:");
+  Serial.print(outlet1Active ? "ON " : "OFF ");
+  Serial.print("2:");
+  Serial.print(outlet2Active ? "ON " : "OFF ");
+  Serial.print("3:");
+  Serial.print(outlet3Active ? "ON " : "OFF ");
+  Serial.print("4:");
+  Serial.println(outlet4Active ? "ON" : "OFF");
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-  (void)topic;
-  if (length == 0 || length > 512) return;
+  Serial.print("MQTT message arrived on topic: ");
+  Serial.println(topic);
 
-  char buf[512];
+  if (length == 0 || length > 512) {
+    Serial.println("MQTT payload invalid length");
+    return;
+  }
+
+  char buf[513];
   memcpy(buf, payload, length);
   buf[length] = '\0';
 
+  Serial.print("Payload: ");
+  Serial.println(buf);
+
   StaticJsonDocument<256> doc;
-  if (deserializeJson(doc, buf)) return;
+  DeserializationError err = deserializeJson(doc, buf);
+  if (err) {
+    Serial.print("MQTT JSON parse failed: ");
+    Serial.println(err.c_str());
+    return;
+  }
 
   const char* ev = doc["ev"];
-  if (!ev || strcmp(ev, "outlet") != 0) return;
+  if (!ev || strcmp(ev, "outlet") != 0) {
+    Serial.println("MQTT event ignored");
+    return;
+  }
 
   const char* id = doc["id"];
-  if (!id) return;
+  if (!id) {
+    Serial.println("MQTT missing outlet id");
+    return;
+  }
+
   bool is_active = doc["is_active"] | false;
 
   if (strcmp(id, OUTLET_1_ID) == 0) {
@@ -87,10 +148,12 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   } else if (strcmp(id, OUTLET_4_ID) == 0) {
     outlet4Active = is_active;
   } else {
+    Serial.println("MQTT outlet id not recognized");
     return;
   }
 
   applyRelayStates();
+
   Serial.print("Outlet MQTT: ");
   Serial.print(id);
   Serial.print(" -> ");
@@ -99,17 +162,22 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
 bool connectMqtt() {
   String topic = String("safestrip/device/") + relayDeviceId + "/dashboard";
-  wifiTls.setInsecure();
 
+  wifiTls.setInsecure();
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(onMqttMessage);
   mqtt.setBufferSize(512);
+  mqtt.setKeepAlive(30);
 
   uint8_t mac[6];
   WiFi.macAddress(mac);
-  char clientId[28];
+
+  char clientId[32];
   snprintf(clientId, sizeof(clientId), "safestrip-%02x%02x%02x%02x",
            mac[2], mac[3], mac[4], mac[5]);
+
+  Serial.print("Connecting MQTT as client: ");
+  Serial.println(clientId);
 
   if (!mqtt.connect(clientId, MQTT_USER, MQTT_PASS)) {
     Serial.print("MQTT connect failed, state=");
@@ -117,24 +185,32 @@ bool connectMqtt() {
     return false;
   }
 
+  Serial.println("MQTT connected");
+
   if (!mqtt.subscribe(topic.c_str())) {
     Serial.println("MQTT subscribe failed");
     mqtt.disconnect();
     return false;
   }
 
-  Serial.println("MQTT connected & subscribed");
+  Serial.print("Subscribed to: ");
+  Serial.println(topic);
+
   return true;
 }
 
-/** Single GET at boot so relays match DB before any new MQTT messages (optional). */
 bool syncOutletsFromHttpOnce() {
   String url = String(backendBaseUrl) + "/api/device-outlets?device_id=" + relayDeviceId;
   HTTPClient http;
+
+  Serial.print("HTTP relay sync -> ");
+  Serial.println(url);
+
   http.begin(url);
   int code = http.GET();
+
   if (code != HTTP_CODE_OK) {
-    Serial.print("Boot HTTP sync failed: ");
+    Serial.print("Relay sync failed, code: ");
     Serial.println(code);
     http.end();
     return false;
@@ -144,12 +220,18 @@ bool syncOutletsFromHttpOnce() {
   http.end();
 
   StaticJsonDocument<1024> doc;
-  if (deserializeJson(doc, payload) || !doc.is<JsonArray>()) return false;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err || !doc.is<JsonArray>()) {
+    Serial.println("Relay sync JSON parse failed");
+    return false;
+  }
 
   bool found1 = false, found2 = false, found3 = false, found4 = false;
+
   for (JsonObject obj : doc.as<JsonArray>()) {
     const char* id = obj["id"];
     if (!id) continue;
+
     bool is_active = obj["is_active"] | false;
 
     if (strcmp(id, OUTLET_1_ID) == 0) {
@@ -167,112 +249,45 @@ bool syncOutletsFromHttpOnce() {
     }
   }
 
-  if (found1 && found2 && found3 && found4) {
-    applyRelayStates();
-    Serial.println("Boot: synced relays from HTTP");
-  }
+  applyRelayStates();
+  Serial.println("Relay states synced from HTTP");
+
   return found1 && found2 && found3 && found4;
 }
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("hello");
+void connectWiFiIfNeeded() {
+  if (WiFi.status() == WL_CONNECTED) return;
 
-  pinMode(RELAY_PIN, OUTPUT);
-  pinMode(RELAY_PIN_2, OUTPUT);
-  pinMode(RELAY_PIN_3, OUTPUT);
-  pinMode(RELAY_PIN_4, OUTPUT);
+  unsigned long now = millis();
+  if (now - lastWiFiReconnectAttempt < wifiReconnectInterval) return;
+  lastWiFiReconnectAttempt = now;
 
-  digitalWrite(RELAY_PIN, HIGH);
-  digitalWrite(RELAY_PIN_2, HIGH);
-  digitalWrite(RELAY_PIN_3, HIGH);
-  digitalWrite(RELAY_PIN_4, HIGH);
-
-  // Custom I2C pins
-  Wire.begin(26, 27);
-  delay(100);
-
-  Serial.println("Scanning I2C...");
-  for (byte addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.print("Found device at 0x");
-      Serial.println(addr, HEX);
-    }
-  }
-
-  if (!ads.begin(0x48, &Wire)) {
-    Serial.println("Failed to initialize ADS1115!");
-    while (1);
-  }
-
-  ads.setGain(GAIN_TWOTHIRDS);
-
-  Serial.println("ADS1115 initialized.");
-
+  Serial.println("WiFi disconnected. Reconnecting...");
+  WiFi.disconnect();
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("\nConnected!");
-
-  syncOutletsFromHttpOnce();
-
-  if (!connectMqtt()) {
-    Serial.println("Will retry MQTT in loop");
-  }
 }
 
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    return;
-  }
+void readSensors() {
+  // WATER
+  waterValue = analogRead(waterPin);
+  waterDetected = (waterValue > waterThreshold);
 
-  if (!mqtt.connected()) {
-    delay(1000);
-    connectMqtt();
-  } else {
-    mqtt.loop();
-  }
+  // SMOKE
+  smokeValue = analogRead(gasPin);
+  smokeDetected = (smokeValue > smokeThreshold);
 
-  // -------- WATER SENSOR --------
-  int value = analogRead(waterPin);
-  bool waterDetected = (value < waterThreshold);
+  // TEMP
+  tempValue = analogRead(tempPin);
+  float voltage = (tempValue / 4095.0f) * 3.3f;
+  temperatureC = voltage * 100.0f;   // LM35 assumption
+  overheatDetected = (temperatureC > overheatThreshold);
 
-  Serial.print("Water Analog value: ");
-  Serial.println(value);
-  Serial.println(waterDetected ? "Water detected" : "Dry");
+  // CURRENT via ADS1115
+  minVal = 32767;
+  maxVal = -32768;
 
-  // -------- SMOKE SENSOR --------
-  int smokeValue = analogRead(gasPin);
-  bool smokeDetected = (smokeValue > smokeThreshold);
-
-  Serial.print("Smoke analog value: ");
-  Serial.println(smokeValue);
-  Serial.println(smokeDetected ? "Smoke detected" : "No smoke detected");
-
-  // -------- TEMP SENSOR --------
-  int tempValue = analogRead(tempPin);
-  float voltage = (tempValue / 4095.0) * 3.3;
-  float temperatureC = voltage * 100.0;   // LM35 = 10mV/°C
-  bool overheatDetected = (temperatureC > overheatThreshold);
-
-  Serial.print("Temperature raw value: ");
-  Serial.println(tempValue);
-  Serial.print("Temperature C: ");
-  Serial.println(temperatureC);
-  Serial.println(overheatDetected ? "Overheat detected" : "Temperature normal");
-
-  // -------- CURRENT SENSOR via ADS1115 --------
-  int16_t minVal = 32767;
-  int16_t maxVal = -32768;
-
-  for (int i = 0; i < 500; i++) {
+  for (int i = 0; i < 100; i++) {
+    mqtt.loop(); // keep MQTT responsive during ADC sampling
     int16_t sample = ads.readADC_SingleEnded(0);
     if (sample < minVal) minVal = sample;
     if (sample > maxVal) maxVal = sample;
@@ -281,11 +296,23 @@ void loop() {
   float minVoltage = minVal * 0.1875f / 1000.0f;
   float maxVoltage = maxVal * 0.1875f / 1000.0f;
 
-  // use the signal swing as your "current activity" value
-  int16_t currentValue = maxVal - minVal;
-  float currentVoltage = maxVoltage - minVoltage;
+  currentValue = maxVal - minVal;
+  currentVoltage = maxVoltage - minVoltage;
+  overCurrentDetected = demoOverCurrent || (currentValue > currentRawThreshold);
 
-  bool overCurrentDetected = demoOverCurrent || (currentValue > currentRawThreshold);
+  Serial.print("Water Analog value: ");
+  Serial.println(waterValue);
+  Serial.println(waterDetected ? "Water detected" : "Dry");
+
+  Serial.print("Smoke analog value: ");
+  Serial.println(smokeValue);
+  Serial.println(smokeDetected ? "Smoke detected" : "No smoke detected");
+
+  Serial.print("Temperature raw value: ");
+  Serial.println(tempValue);
+  Serial.print("Temperature C: ");
+  Serial.println(temperatureC);
+  Serial.println(overheatDetected ? "Overheat detected" : "Temperature normal");
 
   Serial.print("Min ADC: ");
   Serial.print(minVal);
@@ -305,124 +332,203 @@ void loop() {
   Serial.println(overCurrentDetected ? "YES" : "NO");
 
   Serial.println("-----------------------------");
+}
 
-  if (WiFi.status() == WL_CONNECTED) {
-    char q = char(34);
+void uploadSensors() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected, skipping upload.");
+    return;
+  }
 
-    // -------- WATER POST --------
+  String url = String(backendBaseUrl) + "/sensor-readings";
+  char q = char(34);
+
+  // WATER
+  {
     HTTPClient http;
-    String url = String(backendBaseUrl) + "/sensor-readings";
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
 
     String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
-                  + String(q) + "sensor_type" + String(q) + ":" + String(q) + "water" + String(q) + ","
-                  + String(q) + "value" + String(q) + ":" + String(value) + ","
-                  + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
-                  + String(q) + "raw" + String(q) + ":{" + String(q) + "waterDetected" + String(q) + ":"
-                  + (waterDetected ? "true" : "false") + "}}";
+                + String(q) + "sensor_type" + String(q) + ":" + String(q) + "water" + String(q) + ","
+                + String(q) + "value" + String(q) + ":" + String(waterValue) + ","
+                + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
+                + String(q) + "raw" + String(q) + ":{"
+                + String(q) + "waterDetected" + String(q) + ":" + (waterDetected ? "true" : "false")
+                + "}}";
 
-    int httpCode = http.POST(json);
+    int code = http.POST(json);
     Serial.print("POST /sensor-readings (water) -> ");
-    Serial.println(httpCode);
+    Serial.println(code);
     http.end();
-
-    // -------- TEMPERATURE POST --------
-    HTTPClient httpTemp;
-    String tempUrl = String(backendBaseUrl) + "/sensor-readings";
-    httpTemp.begin(tempUrl);
-    httpTemp.addHeader("Content-Type", "application/json");
-
-    String tempJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
-                    + String(q) + "sensor_type" + String(q) + ":" + String(q) + "temp" + String(q) + ","
-                    + String(q) + "value" + String(q) + ":" + String(temperatureC) + ","
-                    + String(q) + "unit" + String(q) + ":" + String(q) + "C" + String(q) + ","
-                    + String(q) + "raw" + String(q) + ":{"
-                    + String(q) + "tempValue" + String(q) + ":" + String(tempValue) + ","
-                    + String(q) + "temperatureC" + String(q) + ":" + String(temperatureC) + ","
-                    + String(q) + "overheatDetected" + String(q) + ":" + (overheatDetected ? "true" : "false") + ","
-                    + String(q) + "threshold" + String(q) + ":" + String(overheatThreshold) + "}}";
-
-    int tempCode = httpTemp.POST(tempJson);
-    Serial.print("POST /sensor-readings (temp) -> ");
-    Serial.println(tempCode);
-    httpTemp.end();
-
-    // -------- CURRENT POST --------
-    HTTPClient httpCurrent;
-    String currentUrl = String(backendBaseUrl) + "/sensor-readings";
-    httpCurrent.begin(currentUrl);
-    httpCurrent.addHeader("Content-Type", "application/json");
-
-    String currentJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
-                       + String(q) + "sensor_type" + String(q) + ":" + String(q) + "current" + String(q) + ","
-                       + String(q) + "value" + String(q) + ":" + String(currentValue) + ","
-                       + String(q) + "unit" + String(q) + ":" + String(q) + "ads_raw" + String(q) + ","
-                       + String(q) + "raw" + String(q) + ":{"
-                       + String(q) + "currentValue" + String(q) + ":" + String(currentValue) + ","
-                       + String(q) + "currentVoltage" + String(q) + ":" + String(currentVoltage, 4) + ","
-                       + String(q) + "overCurrentDetected" + String(q) + ":" + (overCurrentDetected ? "true" : "false") + ","
-                       + String(q) + "threshold" + String(q) + ":" + String(currentRawThreshold)
-                       + "}}";
-
-    int currentCode = httpCurrent.POST(currentJson);
-    Serial.print("POST /sensor-readings (current) -> ");
-    Serial.println(currentCode);
-    Serial.println(httpCurrent.getString());
-    httpCurrent.end();
-
-    // -------- SMOKE POST --------
-    HTTPClient httpSmoke;
-    String smokeUrl = String(backendBaseUrl) + "/sensor-readings";
-    httpSmoke.begin(smokeUrl);
-    httpSmoke.addHeader("Content-Type", "application/json");
-
-    String smokeJson = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
-                    + String(q) + "sensor_type" + String(q) + ":" + String(q) + "smoke" + String(q) + ","
-                    + String(q) + "value" + String(q) + ":" + String(smokeValue) + ","
-                    + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
-                    + String(q) + "raw" + String(q) + ":{"
-                    + String(q) + "smokeDetected" + String(q) + ":" + (smokeDetected ? "true" : "false") + ","
-                    + String(q) + "threshold" + String(q) + ":" + String(smokeThreshold) + "}}";
-
-    int smokeCode = httpSmoke.POST(smokeJson);
-    Serial.print("POST /sensor-readings (smoke) -> ");
-    Serial.println(smokeCode);
-    httpSmoke.end();
-
-  } else {
-    Serial.println("WiFi not connected, skipping upload.");
   }
 
-  delay(5000);
+  mqtt.loop();
+
+  // TEMP
+  {
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+
+    String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                + String(q) + "sensor_type" + String(q) + ":" + String(q) + "temp" + String(q) + ","
+                + String(q) + "value" + String(q) + ":" + String(temperatureC, 2) + ","
+                + String(q) + "unit" + String(q) + ":" + String(q) + "C" + String(q) + ","
+                + String(q) + "raw" + String(q) + ":{"
+                + String(q) + "tempValue" + String(q) + ":" + String(tempValue) + ","
+                + String(q) + "temperatureC" + String(q) + ":" + String(temperatureC, 2) + ","
+                + String(q) + "overheatDetected" + String(q) + ":" + (overheatDetected ? "true" : "false") + ","
+                + String(q) + "threshold" + String(q) + ":" + String(overheatThreshold, 2)
+                + "}}";
+
+    int code = http.POST(json);
+    Serial.print("POST /sensor-readings (temp) -> ");
+    Serial.println(code);
+    http.end();
+  }
+
+  mqtt.loop();
+
+  // CURRENT
+  {
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+
+    String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                + String(q) + "sensor_type" + String(q) + ":" + String(q) + "current" + String(q) + ","
+                + String(q) + "value" + String(q) + ":" + String(currentValue) + ","
+                + String(q) + "unit" + String(q) + ":" + String(q) + "ads_raw" + String(q) + ","
+                + String(q) + "raw" + String(q) + ":{"
+                + String(q) + "currentValue" + String(q) + ":" + String(currentValue) + ","
+                + String(q) + "currentVoltage" + String(q) + ":" + String(currentVoltage, 4) + ","
+                + String(q) + "overCurrentDetected" + String(q) + ":" + (overCurrentDetected ? "true" : "false") + ","
+                + String(q) + "threshold" + String(q) + ":" + String(currentRawThreshold)
+                + "}}";
+
+    int code = http.POST(json);
+    Serial.print("POST /sensor-readings (current) -> ");
+    Serial.println(code);
+    http.end();
+  }
+
+  mqtt.loop();
+
+  // SMOKE
+  {
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+
+    String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + deviceId + String(q) + ","
+                + String(q) + "sensor_type" + String(q) + ":" + String(q) + "smoke" + String(q) + ","
+                + String(q) + "value" + String(q) + ":" + String(smokeValue) + ","
+                + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
+                + String(q) + "raw" + String(q) + ":{"
+                + String(q) + "smokeDetected" + String(q) + ":" + (smokeDetected ? "true" : "false") + ","
+                + String(q) + "threshold" + String(q) + ":" + String(smokeThreshold)
+                + "}}";
+
+    int code = http.POST(json);
+    Serial.print("POST /sensor-readings (smoke) -> ");
+    Serial.println(code);
+    http.end();
+  }
 }
 
-// #include <Wire.h>
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("hello");
 
-// void setup() {
-//   Serial.begin(115200);
-//   delay(1000);
-//   Serial.println("I2C scan starting");
-//   Wire.begin(26, 27);
-// }
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(RELAY_PIN_2, OUTPUT);
+  pinMode(RELAY_PIN_3, OUTPUT);
+  pinMode(RELAY_PIN_4, OUTPUT);
 
-// void loop() {
-//   int found = 0;
-//   Serial.println("Scanning...");
+  // Relay OFF initially (active LOW board)
+  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(RELAY_PIN_2, HIGH);
+  digitalWrite(RELAY_PIN_3, HIGH);
+  digitalWrite(RELAY_PIN_4, HIGH);
 
-//   for (byte addr = 1; addr < 127; addr++) {
-//     Wire.beginTransmission(addr);
-//     if (Wire.endTransmission() == 0) {
-//       Serial.print("Found device at 0x");
-//       if (addr < 16) Serial.print("0");
-//       Serial.println(addr, HEX);
-//       found++;
-//     }
-//   }
+  Wire.begin(26, 27);
+  delay(100);
 
-//   if (found == 0) {
-//     Serial.println("No I2C devices found");
-//   }
+  Serial.println("Scanning I2C...");
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("Found device at 0x");
+      if (addr < 16) Serial.print("0");
+      Serial.println(addr, HEX);
+    }
+  }
 
-//   delay(3000);
-// }
+  if (!ads.begin(0x48, &Wire)) {
+    Serial.println("Failed to initialize ADS1115!");
+    while (1) {
+      delay(1000);
+    }
+  }
+
+  ads.setGain(GAIN_TWOTHIRDS);
+  Serial.println("ADS1115 initialized.");
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+
+  syncOutletsFromHttpOnce();
+
+  if (!connectMqtt()) {
+    Serial.println("Initial MQTT connect failed. Will retry in loop.");
+  }
+}
+
+void loop() {
+  connectWiFiIfNeeded();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!mqtt.connected()) {
+      unsigned long now = millis();
+      if (now - lastMqttReconnectAttempt >= mqttReconnectInterval) {
+        lastMqttReconnectAttempt = now;
+        Serial.println("Attempting MQTT reconnect...");
+        connectMqtt();
+      }
+    } else {
+      mqtt.loop();
+    }
+  }
+
+  // Keep MQTT responsive
+  mqtt.loop();
+
+  unsigned long now = millis();
+
+  // Read and print sensors every 1 second
+  if (now - lastSensorPrint >= sensorInterval) {
+    lastSensorPrint = now;
+    readSensors();
+  }
+
+  // Upload sensors every 10 seconds
+  if (now - lastUpload >= uploadInterval) {
+    lastUpload = now;
+    uploadSensors();
+  }
+
+  // Backup relay sync every 5 seconds
+  if (now - lastRelaySync >= relaySyncInterval) {
+    lastRelaySync = now;
+    syncOutletsFromHttpOnce();
+  }
+
+  delay(20);
+}
