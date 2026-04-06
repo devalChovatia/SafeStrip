@@ -8,7 +8,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, ConfigDict
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -17,28 +16,6 @@ from ..mqtt_publish import publish_dashboard_event
 
 router = APIRouter(prefix="/sensor-readings", tags=["sensor-readings"])
 logger = logging.getLogger(__name__)
-
-def _reading_payload(
-    *,
-    id: Any,
-    device_id: Any,
-    sensor_type_label: str,
-    value: Any,
-    unit: Any,
-    raw: Any,
-    created_at: Any,
-) -> dict[str, Any]:
-    """JSON shape for one reading; sensor_type is normalized lowercase for the app."""
-    st = str(sensor_type_label).lower().strip()
-    return {
-        "id": str(id),
-        "device_id": str(device_id),
-        "sensor_type": st,
-        "value": float(value),
-        "unit": unit,
-        "raw": raw,
-        "created_at": created_at.isoformat() if created_at else None,
-    }
 
 
 class SensorReadingCreate(BaseModel):
@@ -173,40 +150,32 @@ def get_latest_sensor_reading(
     """
     Return the latest sensor_readings row for a device and sensor_type.
     Used by the demo app to poll the water sensor.
-    Compares sensor_type case-insensitively (PostgreSQL enum labels may be SMOKE vs smoke).
     """
     try:
-        st = sensor_type.value if hasattr(sensor_type, "value") else str(sensor_type)
         row = (
-            db.execute(
-                text(
-                    """
-                    SELECT id, device_id, sensor_type::text AS st, value, unit, raw, created_at
-                    FROM sensor_readings
-                    WHERE device_id = CAST(:did AS uuid)
-                      AND lower(sensor_type::text) = lower(:stype)
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                    """
-                ),
-                {"did": str(device_id), "stype": st},
+            db.query(SensorReading)
+            .filter(
+                SensorReading.device_id == device_id,
+                SensorReading.sensor_type == sensor_type,
             )
-            .mappings()
+            .order_by(SensorReading.created_at.desc())
             .first()
         )
 
         if not row:
             return None
 
-        return _reading_payload(
-            id=row["id"],
-            device_id=row["device_id"],
-            sensor_type_label=row["st"],
-            value=row["value"],
-            unit=row["unit"],
-            raw=row["raw"],
-            created_at=row["created_at"],
-        )
+        return {
+            "id": str(row.id),
+            "device_id": str(row.device_id),
+            "sensor_type": row.sensor_type.value
+            if hasattr(row.sensor_type, "value")
+            else row.sensor_type,
+            "value": float(row.value),
+            "unit": row.unit,
+            "raw": row.raw,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
     except Exception as e:
         logger.exception("Failed to fetch latest sensor reading")
         raise HTTPException(status_code=500, detail=str(e))
@@ -219,50 +188,37 @@ def get_latest_all_sensor_readings(
     """
     Return the latest sensor_readings row for each sensor type for a device.
     Used when the dashboard wants all latest sensor values at once.
-
-    Uses DISTINCT ON (lower(sensor_type)) so we get the newest row per type even when
-    PostgreSQL enum labels differ in case from SQLAlchemy filters (e.g. SMOKE vs smoke).
     """
     try:
-        canonical_keys = [st.value for st in SensorType]
-        result: dict[str, Optional[dict[str, Any]]] = {k: None for k in canonical_keys}
+        result = {}
 
-        rows = (
-            db.execute(
-                text(
-                    """
-                    SELECT DISTINCT ON (lower(sensor_type::text))
-                        id,
-                        device_id,
-                        sensor_type::text AS st,
-                        value,
-                        unit,
-                        raw,
-                        created_at
-                    FROM sensor_readings
-                    WHERE device_id = CAST(:did AS uuid)
-                    ORDER BY lower(sensor_type::text), created_at DESC
-                    """
-                ),
-                {"did": str(device_id)},
+        for sensor_type in SensorType:
+            row = (
+                db.query(SensorReading)
+                .filter(
+                    SensorReading.device_id == device_id,
+                    SensorReading.sensor_type == sensor_type,
+                )
+                .order_by(SensorReading.created_at.desc())
+                .first()
             )
-            .mappings()
-            .all()
-        )
 
-        for row in rows:
-            nk = str(row["st"] or "").lower().strip()
-            if nk not in result:
-                continue
-            result[nk] = _reading_payload(
-                id=row["id"],
-                device_id=row["device_id"],
-                sensor_type_label=row["st"],
-                value=row["value"],
-                unit=row["unit"],
-                raw=row["raw"],
-                created_at=row["created_at"],
-            )
+            key = sensor_type.value if hasattr(sensor_type, "value") else str(sensor_type)
+
+            if row is None:
+                result[key] = None
+            else:
+                result[key] = {
+                    "id": str(row.id),
+                    "device_id": str(row.device_id),
+                    "sensor_type": row.sensor_type.value
+                    if hasattr(row.sensor_type, "value")
+                    else row.sensor_type,
+                    "value": float(row.value),
+                    "unit": row.unit,
+                    "raw": row.raw,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
 
         return {
             "device_id": str(device_id),
