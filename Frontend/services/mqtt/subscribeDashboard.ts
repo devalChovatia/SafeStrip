@@ -8,6 +8,7 @@ if (typeof global !== "undefined" && !(global as { Buffer?: unknown }).Buffer) {
 export type DashboardMqttHandlers = {
 	onOutlet?: (msg: { id: string; is_active: boolean; outlet_name?: string }) => void;
 	onSensor?: (msg: {
+		sensor_id?: string | null;
 		sensor_type: string;
 		value?: unknown;
 		raw?: unknown;
@@ -56,6 +57,7 @@ export function subscribeDeviceDashboard(deviceId: string, handlers: DashboardMq
 				id?: string;
 				is_active?: boolean;
 				outlet_name?: string;
+				sensor_id?: string | null;
 				sensor_type?: string;
 				value?: unknown;
 				raw?: unknown;
@@ -69,6 +71,7 @@ export function subscribeDeviceDashboard(deviceId: string, handlers: DashboardMq
 				});
 			} else if (msg.ev === "sensor" && msg.sensor_type) {
 				handlers.onSensor?.({
+					sensor_id: msg.sensor_id,
 					sensor_type: msg.sensor_type,
 					value: msg.value,
 					raw: msg.raw,

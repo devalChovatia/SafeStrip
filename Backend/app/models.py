@@ -82,10 +82,28 @@ class SensorReading(Base):
 
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     device_id = Column(PG_UUID(as_uuid=True), nullable=False)
+    sensor_id = Column(PG_UUID(as_uuid=True), ForeignKey('device_sensors.id'), nullable=True)
     sensor_type = Column(Enum(SensorType), nullable=False)
     value = Column(Numeric, nullable=False)
     unit = Column(Text, nullable=True)
     raw = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class DeviceSensor(Base):
+    """
+    Demo-schema sensors table.
+    One sensor per (outlet_id, sensor_type). Used to attach sensor_readings to a specific outlet.
+    """
+
+    __tablename__ = 'device_sensors'
+
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    device_id = Column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    outlet_id = Column(PG_UUID(as_uuid=True), ForeignKey('device_outlets.id'), nullable=False, index=True)
+    sensor_type = Column(String, nullable=False)
+    unit = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 

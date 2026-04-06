@@ -48,6 +48,7 @@ import {
 } from "@/services/api/workspacesApi";
 import { useAppSelector } from "@/store";
 import { subscribeDeviceDashboard } from "@/services/mqtt/subscribeDashboard";
+import { fetchDeviceSensorsForDevice } from "@/services/api/deviceSensorsApi";
 
 interface Outlet {
 	id: number;
@@ -102,6 +103,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 
 	const [lastUpdate, setLastUpdate] = useState(new Date());
 	const [outlets, setOutlets] = useState<Outlet[]>([]);
+	const [sensorOutletById, setSensorOutletById] = useState<Record<string, string>>({});
 
 	// Load outlets from device_outlets + latest water reading for the selected device (detail view).
 	useEffect(() => {
@@ -116,6 +118,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 			try {
 				const apiOutlets = await fetchDeviceOutletsForDevice(selectedDeviceId);
 				if (cancelled) return;
+
+				try {
+					const sensors = await fetchDeviceSensorsForDevice(selectedDeviceId);
+					if (!cancelled) {
+						const map: Record<string, string> = {};
+						sensors.forEach((s) => {
+							// sensor.id -> outlet_id (matches device_outlets.id = Outlet.dbId)
+							map[s.id] = s.outlet_id;
+						});
+						setSensorOutletById(map);
+					}
+				} catch {
+					if (!cancelled) setSensorOutletById({});
+				}
 
 				let sensorFields: ReturnType<typeof deviceSensorFieldsFromReadings> | null = null;
 				try {
@@ -198,15 +214,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 			onSensor: (msg) => {
 				const patch = partialOutletFromSensorPayload(msg);
 				if (Object.keys(patch).length === 0) return;
-				setOutlets((prev) =>
-					prev.length === 0 ? prev : prev.map((outlet) => ({ ...outlet, ...patch })),
-				);
+				setOutlets((prev) => {
+					if (prev.length === 0) return prev;
+					const sid = msg.sensor_id ?? null;
+					const outletDbId = sid ? sensorOutletById[sid] ?? null : null;
+					if (outletDbId) {
+						return prev.map((outlet) =>
+							outlet.dbId === outletDbId ? { ...outlet, ...patch } : outlet,
+						);
+					}
+					// Fallback: device-level sensors (legacy payload) -> apply to all outlets
+					return prev.map((outlet) => ({ ...outlet, ...patch }));
+				});
 				setLastUpdate(new Date());
 			},
 		});
 
 		return disconnect;
-	}, [view, selectedDeviceId]);
+	}, [view, selectedDeviceId, sensorOutletById]);
 
 	// Load rooms (workspaces) and all their devices for the current user
 	useEffect(() => {

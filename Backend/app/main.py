@@ -18,6 +18,7 @@ from .routers import (
     devices_router,
     profiles_router,
     device_outlets_router,
+    device_sensors_router,
 )
 
 
@@ -61,3 +62,4 @@ app.include_router(workspaces_router.router)
 app.include_router(devices_router.router)
 app.include_router(profiles_router.router)
 app.include_router(device_outlets_router.router)
+app.include_router(device_sensors_router.router)
