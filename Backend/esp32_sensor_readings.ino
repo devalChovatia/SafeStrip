@@ -22,79 +22,8 @@ const char* OUTLET_2_ID   = "d1be7829-615d-454e-a84b-1edc63515bab";
 const char* OUTLET_3_ID   = "b7c9d401-63da-4c02-b902-a76086267869";
 const char* OUTLET_4_ID   = "a7028180-df37-4794-ba27-74ded6a0e96c";
 
-// Per-outlet sensor IDs (fetched from backend /api/device-sensors).
-// This sketch currently assigns the single physical sensor set to Outlet 1.
-String SENSOR_WATER_ID;
-String SENSOR_SMOKE_ID;
-String SENSOR_TEMP_ID;
-String SENSOR_CURRENT_ID;
-
-bool sensorsResolved = false;
-
-void publishSensorMqtt(const char* sensorType, const String& sensorId, float value, const char* unit, JsonObject raw) {
-  if (!mqtt.connected()) return;
-
-  String topic = String("safestrip/device/") + relayDeviceId + "/dashboard";
-
-  StaticJsonDocument<512> doc;
-  doc["ev"] = "sensor";
-  doc["device_id"] = relayDeviceId;
-  if (sensorId.length() > 0) doc["sensor_id"] = sensorId;
-  doc["sensor_type"] = sensorType;
-  doc["value"] = value;
-  doc["unit"] = unit;
-  doc["raw"] = raw;
-
-  char out[512];
-  size_t n = serializeJson(doc, out, sizeof(out));
-  if (n == 0) return;
-
-  mqtt.publish(topic.c_str(), out, n);
-}
-
-void publishSensorsMqtt() {
-  if (!mqtt.connected()) return;
-  if (!resolveSensorIdsOnce()) return;
-
-  // WATER
-  {
-    StaticJsonDocument<128> rawDoc;
-    rawDoc["waterDetected"] = waterDetected;
-    JsonObject raw = rawDoc.as<JsonObject>();
-    publishSensorMqtt("water", SENSOR_WATER_ID, (float)waterValue, "analog", raw);
-  }
-
-  // TEMP
-  {
-    StaticJsonDocument<192> rawDoc;
-    rawDoc["tempValue"] = tempValue;
-    rawDoc["temperatureC"] = temperatureC;
-    rawDoc["overheatDetected"] = overheatDetected;
-    rawDoc["threshold"] = overheatThreshold;
-    JsonObject raw = rawDoc.as<JsonObject>();
-    publishSensorMqtt("temp", SENSOR_TEMP_ID, (float)temperatureC, "C", raw);
-  }
-
-  // CURRENT (note: value is ads swing raw, not amps)
-  {
-    StaticJsonDocument<256> rawDoc;
-    rawDoc["currentValue"] = currentValue;
-    rawDoc["currentVoltage"] = currentVoltage;
-    rawDoc["overCurrentDetected"] = overCurrentDetected;
-    rawDoc["threshold"] = currentRawThreshold;
-    JsonObject raw = rawDoc.as<JsonObject>();
-    publishSensorMqtt("current", SENSOR_CURRENT_ID, (float)currentValue, "ads_raw", raw);
-  }
-
-  // SMOKE
-  {
-    StaticJsonDocument<192> rawDoc;
-    rawDoc["smokeDetected"] = smokeDetected;
-    rawDoc["threshold"] = smokeThreshold;
-    JsonObject raw = rawDoc.as<JsonObject>();
-    publishSensorMqtt("smoke", SENSOR_SMOKE_ID, (float)smokeValue, "analog", raw);
-  }
-}
+// Forward declarations (implementations are below the global sensor variables).
+void publishSensorsMqtt();
 
 // Sensor pins
 const int waterPin = 34;
@@ -112,6 +41,7 @@ Adafruit_ADS1115 ads;
 
 WiFiClientSecure wifiTls;
 PubSubClient mqtt(wifiTls);
+WiFiClientSecure wifiTlsHttp;
 
 // Relay states
 bool outlet1Active = false;
@@ -156,6 +86,69 @@ int16_t currentValue = 0;
 float currentVoltage = 0.0;
 bool overCurrentDetected = false;
 
+void publishSensorMqtt(const char* sensorType, float value, const char* unit, JsonObject raw) {
+  if (!mqtt.connected()) return;
+
+  String topic = String("safestrip/device/") + relayDeviceId + "/dashboard";
+
+  StaticJsonDocument<512> doc;
+  doc["ev"] = "sensor";
+  doc["device_id"] = relayDeviceId;
+  doc["sensor_type"] = sensorType;
+  doc["value"] = value;
+  doc["unit"] = unit;
+  doc["raw"] = raw;
+
+  char out[512];
+  size_t n = serializeJson(doc, out, sizeof(out));
+  if (n == 0) return;
+
+  mqtt.publish(topic.c_str(), out, n);
+}
+
+void publishSensorsMqtt() {
+  if (!mqtt.connected()) return;
+
+  // WATER
+  {
+    StaticJsonDocument<128> rawDoc;
+    rawDoc["waterDetected"] = waterDetected;
+    JsonObject raw = rawDoc.as<JsonObject>();
+    publishSensorMqtt("water", (float)waterValue, "analog", raw);
+  }
+
+  // TEMP
+  {
+    StaticJsonDocument<192> rawDoc;
+    rawDoc["tempValue"] = tempValue;
+    rawDoc["temperatureC"] = temperatureC;
+    rawDoc["overheatDetected"] = overheatDetected;
+    rawDoc["threshold"] = overheatThreshold;
+    JsonObject raw = rawDoc.as<JsonObject>();
+    publishSensorMqtt("temp", (float)temperatureC, "C", raw);
+  }
+
+  // CURRENT (note: value is ads swing raw, not amps)
+  {
+    StaticJsonDocument<256> rawDoc;
+    rawDoc["currentValue"] = currentValue;
+    rawDoc["currentVoltage"] = currentVoltage;
+    rawDoc["overCurrentDetected"] = overCurrentDetected;
+    rawDoc["threshold"] = currentRawThreshold;
+    JsonObject raw = rawDoc.as<JsonObject>();
+    publishSensorMqtt("current", (float)currentValue, "ads_raw", raw);
+  }
+
+  // SMOKE
+  {
+    StaticJsonDocument<192> rawDoc;
+    rawDoc["smokeDetected"] = smokeDetected;
+    rawDoc["threshold"] = smokeThreshold;
+    JsonObject raw = rawDoc.as<JsonObject>();
+    publishSensorMqtt("smoke", (float)smokeValue, "analog", raw);
+  }
+}
+
 void applyRelayStates() {
   // Active LOW relay board
   digitalWrite(RELAY_PIN,   outlet1Active ? LOW : HIGH);
@@ -175,9 +168,6 @@ void applyRelayStates() {
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-  Serial.print("MQTT message arrived on topic: ");
-  Serial.println(topic);
-
   if (length == 0 || length > 512) {
     Serial.println("MQTT payload invalid length");
     return;
@@ -186,9 +176,6 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   char buf[513];
   memcpy(buf, payload, length);
   buf[length] = '\0';
-
-  Serial.print("Payload: ");
-  Serial.println(buf);
 
   StaticJsonDocument<256> doc;
   DeserializationError err = deserializeJson(doc, buf);
@@ -200,9 +187,13 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
   const char* ev = doc["ev"];
   if (!ev || strcmp(ev, "outlet") != 0) {
-    Serial.println("MQTT event ignored");
+    // Ignore sensor (and other) events on this device subscription topic.
     return;
   }
+
+  // Only outlet commands are logged verbosely.
+  Serial.print("MQTT outlet cmd on topic: ");
+  Serial.println(topic);
 
   const char* id = doc["id"];
   if (!id) {
@@ -279,7 +270,8 @@ bool syncOutletsFromHttpOnce() {
   Serial.print("HTTP relay sync -> ");
   Serial.println(url);
 
-  http.begin(url);
+  wifiTlsHttp.setInsecure();
+  http.begin(wifiTlsHttp, url);
   int code = http.GET();
 
   if (code != HTTP_CODE_OK) {
@@ -328,69 +320,6 @@ bool syncOutletsFromHttpOnce() {
   return found1 && found2 && found3 && found4;
 }
 
-bool resolveSensorIdsOnce() {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  if (sensorsResolved) return true;
-
-  // Discover sensors for OUTLET_1_ID (device-level sensors mapped to outlet 1).
-  String url = String(backendBaseUrl) + "/api/device-sensors?device_id=" + relayDeviceId + "&outlet_id=" + OUTLET_1_ID;
-  HTTPClient http;
-  Serial.print("HTTP sensor discovery -> ");
-  Serial.println(url);
-
-  http.begin(url);
-  int code = http.GET();
-  if (code != HTTP_CODE_OK) {
-    Serial.print("Sensor discovery failed, code: ");
-    Serial.println(code);
-    http.end();
-    return false;
-  }
-
-  String payload = http.getString();
-  http.end();
-
-  StaticJsonDocument<2048> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-  if (err || !doc.is<JsonArray>()) {
-    Serial.println("Sensor discovery JSON parse failed");
-    return false;
-  }
-
-  SENSOR_WATER_ID = "";
-  SENSOR_SMOKE_ID = "";
-  SENSOR_TEMP_ID = "";
-  SENSOR_CURRENT_ID = "";
-
-  for (JsonObject obj : doc.as<JsonArray>()) {
-    const char* id = obj["id"];
-    const char* st = obj["sensor_type"];
-    if (!id || !st) continue;
-
-    if (strcmp(st, "water") == 0) SENSOR_WATER_ID = String(id);
-    else if (strcmp(st, "smoke") == 0) SENSOR_SMOKE_ID = String(id);
-    else if (strcmp(st, "temp") == 0) SENSOR_TEMP_ID = String(id);
-    else if (strcmp(st, "current") == 0) SENSOR_CURRENT_ID = String(id);
-  }
-
-  sensorsResolved =
-    SENSOR_WATER_ID.length() > 0 &&
-    SENSOR_SMOKE_ID.length() > 0 &&
-    SENSOR_TEMP_ID.length() > 0 &&
-    SENSOR_CURRENT_ID.length() > 0;
-
-  Serial.print("Sensors resolved: ");
-  Serial.println(sensorsResolved ? "YES" : "NO");
-  if (sensorsResolved) {
-    Serial.print("water="); Serial.println(SENSOR_WATER_ID);
-    Serial.print("smoke="); Serial.println(SENSOR_SMOKE_ID);
-    Serial.print("temp="); Serial.println(SENSOR_TEMP_ID);
-    Serial.print("current="); Serial.println(SENSOR_CURRENT_ID);
-  }
-
-  return sensorsResolved;
-}
-
 void connectWiFiIfNeeded() {
   if (WiFi.status() == WL_CONNECTED) return;
 
@@ -436,38 +365,38 @@ void readSensors() {
   currentVoltage = maxVoltage - minVoltage;
   overCurrentDetected = demoOverCurrent || (currentValue > currentRawThreshold);
 
-  Serial.print("Water Analog value: ");
-  Serial.println(waterValue);
-  Serial.println(waterDetected ? "Water detected" : "Dry");
+  // Serial.print("Water Analog value: ");
+  // Serial.println(waterValue);
+  // Serial.println(waterDetected ? "Water detected" : "Dry");
 
   Serial.print("Smoke analog value: ");
   Serial.println(smokeValue);
   Serial.println(smokeDetected ? "Smoke detected" : "No smoke detected");
 
-  Serial.print("Temperature raw value: ");
-  Serial.println(tempValue);
-  Serial.print("Temperature C: ");
-  Serial.println(temperatureC);
-  Serial.println(overheatDetected ? "Overheat detected" : "Temperature normal");
+  // Serial.print("Temperature raw value: ");
+  // Serial.println(tempValue);
+  // Serial.print("Temperature C: ");
+  // Serial.println(temperatureC);
+  // Serial.println(overheatDetected ? "Overheat detected" : "Temperature normal");
 
-  Serial.print("Min ADC: ");
-  Serial.print(minVal);
-  Serial.print(" | Max ADC: ");
-  Serial.print(maxVal);
-  Serial.print(" | Swing ADC: ");
-  Serial.println(currentValue);
+  // Serial.print("Min ADC: ");
+  // Serial.print(minVal);
+  // Serial.print(" | Max ADC: ");
+  // Serial.print(maxVal);
+  // Serial.print(" | Swing ADC: ");
+  // Serial.println(currentValue);
 
-  Serial.print("Min V: ");
-  Serial.print(minVoltage, 4);
-  Serial.print(" | Max V: ");
-  Serial.print(maxVoltage, 4);
-  Serial.print(" | Swing V: ");
-  Serial.println(currentVoltage, 4);
+  // Serial.print("Min V: ");
+  // Serial.print(minVoltage, 4);
+  // Serial.print(" | Max V: ");
+  // Serial.print(maxVoltage, 4);
+  // Serial.print(" | Swing V: ");
+  // Serial.println(currentVoltage, 4);
 
-  Serial.print("Over-current detected: ");
-  Serial.println(overCurrentDetected ? "YES" : "NO");
+  // Serial.print("Over-current detected: ");
+  // Serial.println(overCurrentDetected ? "YES" : "NO");
 
-  Serial.println("-----------------------------");
+  // Serial.println("-----------------------------");
 
   // Real-time updates to the app over MQTT (sensorInterval cadence).
   publishSensorsMqtt();
@@ -479,20 +408,19 @@ void uploadSensors() {
     return;
   }
 
+  wifiTlsHttp.setInsecure();
   String url = String(backendBaseUrl) + "/sensor-readings";
   char q = char(34);
 
-  // Ensure we have sensor IDs so readings are attached to an outlet.
-  resolveSensorIdsOnce();
+  // Sensor readings are device-wide for now (no per-outlet sensor_id assignment).
 
   // WATER
   {
     HTTPClient http;
-    http.begin(url);
+    http.begin(wifiTlsHttp, url);
     http.addHeader("Content-Type", "application/json");
 
     String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + relayDeviceId + String(q) + ","
-                + (SENSOR_WATER_ID.length() ? (String(q) + "sensor_id" + String(q) + ":" + String(q) + SENSOR_WATER_ID + String(q) + ",") : "")
                 + String(q) + "sensor_type" + String(q) + ":" + String(q) + "water" + String(q) + ","
                 + String(q) + "value" + String(q) + ":" + String(waterValue) + ","
                 + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
@@ -511,11 +439,10 @@ void uploadSensors() {
   // TEMP
   {
     HTTPClient http;
-    http.begin(url);
+    http.begin(wifiTlsHttp, url);
     http.addHeader("Content-Type", "application/json");
 
     String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + relayDeviceId + String(q) + ","
-                + (SENSOR_TEMP_ID.length() ? (String(q) + "sensor_id" + String(q) + ":" + String(q) + SENSOR_TEMP_ID + String(q) + ",") : "")
                 + String(q) + "sensor_type" + String(q) + ":" + String(q) + "temp" + String(q) + ","
                 + String(q) + "value" + String(q) + ":" + String(temperatureC, 2) + ","
                 + String(q) + "unit" + String(q) + ":" + String(q) + "C" + String(q) + ","
@@ -537,11 +464,10 @@ void uploadSensors() {
   // CURRENT
   {
     HTTPClient http;
-    http.begin(url);
+    http.begin(wifiTlsHttp, url);
     http.addHeader("Content-Type", "application/json");
 
     String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + relayDeviceId + String(q) + ","
-                + (SENSOR_CURRENT_ID.length() ? (String(q) + "sensor_id" + String(q) + ":" + String(q) + SENSOR_CURRENT_ID + String(q) + ",") : "")
                 + String(q) + "sensor_type" + String(q) + ":" + String(q) + "current" + String(q) + ","
                 + String(q) + "value" + String(q) + ":" + String(currentValue) + ","
                 + String(q) + "unit" + String(q) + ":" + String(q) + "ads_raw" + String(q) + ","
@@ -563,11 +489,10 @@ void uploadSensors() {
   // SMOKE
   {
     HTTPClient http;
-    http.begin(url);
+    http.begin(wifiTlsHttp, url);
     http.addHeader("Content-Type", "application/json");
 
     String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + relayDeviceId + String(q) + ","
-                + (SENSOR_SMOKE_ID.length() ? (String(q) + "sensor_id" + String(q) + ":" + String(q) + SENSOR_SMOKE_ID + String(q) + ",") : "")
                 + String(q) + "sensor_type" + String(q) + ":" + String(q) + "smoke" + String(q) + ","
                 + String(q) + "value" + String(q) + ":" + String(smokeValue) + ","
                 + String(q) + "unit" + String(q) + ":" + String(q) + "analog" + String(q) + ","
@@ -631,7 +556,6 @@ void setup() {
   Serial.println("\nConnected to WiFi");
 
   syncOutletsFromHttpOnce();
-  resolveSensorIdsOnce();
 
   if (!connectMqtt()) {
     Serial.println("Initial MQTT connect failed. Will retry in loop.");

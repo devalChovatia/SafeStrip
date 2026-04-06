@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import SensorReading, SensorType, DeviceSensor
+from ..models import SensorReading, SensorType
 from ..mqtt_publish import publish_dashboard_event
 
 router = APIRouter(prefix="/sensor-readings", tags=["sensor-readings"])
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 class SensorReadingCreate(BaseModel):
     device_id: UUID
-    sensor_id: Optional[UUID] = None
     sensor_type: SensorType
     value: float = Field(..., description="Numeric reading value")
     unit: Optional[str] = None
@@ -35,16 +34,8 @@ class SensorReadingBatchCreate(BaseModel):
 def create_sensor_reading(payload: SensorReadingCreate, db: Session = Depends(get_db)):
     """Create a water (or other) sensor reading. id and created_at are set by the server."""
     try:
-        if payload.sensor_id is not None:
-            sensor = db.query(DeviceSensor).filter(DeviceSensor.id == payload.sensor_id).first()
-            if sensor is None:
-                raise HTTPException(status_code=400, detail="Invalid sensor_id")
-            if str(sensor.device_id) != str(payload.device_id):
-                raise HTTPException(status_code=400, detail="sensor_id does not belong to device_id")
-
         row = SensorReading(
             device_id=payload.device_id,
-            sensor_id=payload.sensor_id,
             sensor_type=payload.sensor_type,
             value=payload.value,
             unit=payload.unit,
@@ -60,7 +51,6 @@ def create_sensor_reading(payload: SensorReadingCreate, db: Session = Depends(ge
             {
                 "ev": "sensor",
                 "device_id": device_id_str,
-                "sensor_id": str(row.sensor_id) if row.sensor_id else None,
                 "sensor_type": st,
                 "value": float(row.value),
                 "unit": row.unit,
@@ -71,7 +61,6 @@ def create_sensor_reading(payload: SensorReadingCreate, db: Session = Depends(ge
         return {
             "id": str(row.id),
             "device_id": device_id_str,
-            "sensor_id": str(row.sensor_id) if row.sensor_id else None,
             "sensor_type": st,
             "value": float(row.value),
             "unit": row.unit,

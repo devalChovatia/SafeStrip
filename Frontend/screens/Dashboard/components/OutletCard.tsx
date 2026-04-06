@@ -75,6 +75,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({
   onRename,
   powerDisabled = false,
 }) => {
+  const showSensors = outlet.id === 1;
   const [editingName, setEditingName] = React.useState(false);
   const [draftName, setDraftName] = React.useState(outlet.name);
 
@@ -148,92 +149,94 @@ export const OutletCard: React.FC<OutletCardProps> = ({
       </View>
 
       {/* Sensor Grid */}
-      <View style={styles.sensorWrap}>
-        <View style={styles.sensorRow}>
-          <View style={styles.sensorCell}>
-            <SensorReading
-              icon="🌡️"
-              label="Temp"
-              value={
-                outlet.temperature != null
-                  ? `${outlet.temperature.toFixed(1)}°C`
-                  : '—'
-              }
-              status={
-                outlet.overheatWarning
-                  ? 'danger'
-                  : outlet.temperature != null && outlet.temperature > 35
-                    ? 'warning'
-                    : 'normal'
-              }
-              disabled={false}
-            />
+      {showSensors && (
+        <View style={styles.sensorWrap}>
+          <View style={styles.sensorRow}>
+            <View style={styles.sensorCell}>
+              <SensorReading
+                icon="🌡️"
+                label="Temp"
+                value={
+                  outlet.temperature != null
+                    ? `${outlet.temperature.toFixed(1)}°C`
+                    : '—'
+                }
+                status={
+                  outlet.overheatWarning
+                    ? 'danger'
+                    : outlet.temperature != null && outlet.temperature > 35
+                      ? 'warning'
+                      : 'normal'
+                }
+                disabled={false}
+              />
+            </View>
+            
+            <View style={styles.sensorCell}>
+              <SensorReading
+                icon="⚡"
+                label="Current"
+                value={
+                  outlet.current != null
+                    ? `${outlet.current.toFixed(1)} ${outlet.currentUnit}`
+                    : '—'
+                }
+                status={
+                  outlet.currentWarning
+                    ? 'danger'
+                    : outlet.current != null &&
+                        outlet.currentUnit === 'A' &&
+                        outlet.current > 6
+                      ? 'warning'
+                      : 'normal'
+                }
+                disabled={false}
+              />
+            </View>
+            
+            <View style={styles.sensorCell}>
+              <SensorReading
+                icon="💨"
+                label="Smoke"
+                value={
+                  outlet.smokeValue != null
+                    ? `${outlet.smokeValue.toFixed(0)} ${outlet.smokeUnit}`
+                    : '—'
+                }
+                status={outlet.smokeDetected ? 'danger' : 'normal'}
+                disabled={false}
+              />
+            </View>
+            
+            <View style={styles.sensorCell}>
+              <SensorReading
+                icon="💧"
+                label="Water"
+                value={outlet.waterDetected ? 'Wet' : 'Dry'}
+                status={outlet.waterDetected ? 'danger' : 'normal'}
+                disabled={false}
+              />
+            </View>
           </View>
-          
-          <View style={styles.sensorCell}>
-            <SensorReading
-              icon="⚡"
-              label="Current"
-              value={
-                outlet.current != null
-                  ? `${outlet.current.toFixed(1)} ${outlet.currentUnit}`
-                  : '—'
-              }
-              status={
-                outlet.currentWarning
-                  ? 'danger'
-                  : outlet.current != null &&
-                      outlet.currentUnit === 'A' &&
-                      outlet.current > 6
-                    ? 'warning'
-                    : 'normal'
-              }
-              disabled={false}
-            />
-          </View>
-          
-          <View style={styles.sensorCell}>
-            <SensorReading
-              icon="💨"
-              label="Smoke"
-              value={
-                outlet.smokeValue != null
-                  ? `${outlet.smokeValue.toFixed(0)} ${outlet.smokeUnit}`
-                  : '—'
-              }
-              status={outlet.smokeDetected ? 'danger' : 'normal'}
-              disabled={false}
-            />
-          </View>
-          
-          <View style={styles.sensorCell}>
-            <SensorReading
-              icon="💧"
-              label="Water"
-              value={outlet.waterDetected ? 'Wet' : 'Dry'}
-              status={outlet.waterDetected ? 'danger' : 'normal'}
-              disabled={false}
-            />
-          </View>
-        </View>
 
-        {/* Alerts */}
-        {hasRisk && (
-          <View className="mt-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
-            <Text className="text-xs font-semibold text-red-700">
-              ⚠️ Risk detected - turn off power immediately
-            </Text>
-          </View>
-        )}
-        
-        {!hasRisk && hasWarning && (
-          <View className="mt-4 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <Text className="text-xs font-semibold text-yellow-700">
-              ⚠️ Elevated readings detected
-            </Text>
-          </View>
-        )}
-      </View>
+          {/* Alerts */}
+          {hasRisk && (
+            <View className="mt-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
+              <Text className="text-xs font-semibold text-red-700">
+                ⚠️ Risk detected - turn off power immediately
+              </Text>
+            </View>
+          )}
+          
+          {!hasRisk && hasWarning && (
+            <View className="mt-4 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <Text className="text-xs font-semibold text-yellow-700">
+                ⚠️ Elevated readings detected
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
     </View>
   );
 };
