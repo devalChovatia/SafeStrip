@@ -5,15 +5,6 @@ interface Outlet {
   id: number;
   name: string;
   powerOn: boolean;
-  temperature: number | null;
-  current: number | null;
-  currentUnit: string;
-  smokeValue: number | null;
-  smokeUnit: string;
-  smokeDetected: boolean;
-  waterDetected: boolean;
-  overheatWarning: boolean;
-  currentWarning: boolean;
 }
 
 interface OutletCardProps {
@@ -23,59 +14,12 @@ interface OutletCardProps {
   powerDisabled?: boolean;
 }
 
-interface SensorReadingProps {
-  icon: string;
-  label: string;
-  value: string;
-  status: 'normal' | 'warning' | 'danger';
-  disabled?: boolean;
-}
-
-const SensorReading: React.FC<SensorReadingProps> = ({ 
-  icon, 
-  label, 
-  value, 
-  status, 
-  disabled 
-}) => {
-  const statusStyles = {
-    normal: 'bg-gray-50 border-gray-200',
-    warning: 'bg-yellow-50 border-yellow-300',
-    danger: 'bg-red-50 border-red-300',
-  };
-
-  const iconStyles = {
-    normal: 'text-blue-600',
-    warning: 'text-yellow-600',
-    danger: 'text-red-600',
-  };
-
-  return (
-    <View className={`rounded-xl px-3 py-2.5 border ${
-      disabled ? 'bg-gray-50 border-gray-200' : statusStyles[status]
-    }`}>
-      <View className="flex-row items-center gap-2 mb-1.5">
-        <Text className={disabled ? 'text-gray-400' : iconStyles[status]}>
-          {icon}
-        </Text>
-        <Text className={`text-xs font-medium ${disabled ? 'text-gray-400' : 'text-gray-600'}`}>
-          {label}
-        </Text>
-      </View>
-      <Text className={`text-base font-semibold ${disabled ? 'text-gray-400' : 'text-gray-900'}`}>
-        {value}
-      </Text>
-    </View>
-  );
-};
-
 export const OutletCard: React.FC<OutletCardProps> = ({
   outlet,
   onPowerToggle,
   onRename,
   powerDisabled = false,
 }) => {
-  const showSensors = outlet.id === 1;
   const [editingName, setEditingName] = React.useState(false);
   const [draftName, setDraftName] = React.useState(outlet.name);
 
@@ -92,9 +36,6 @@ export const OutletCard: React.FC<OutletCardProps> = ({
     onRename(next);
     setEditingName(false);
   };
-
-  const hasRisk = outlet.waterDetected || outlet.smokeDetected;
-  const hasWarning = outlet.overheatWarning || outlet.currentWarning;
   const statePillClass = outlet.powerOn
     ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
     : 'bg-slate-100 border-slate-200 text-slate-600';
@@ -147,96 +88,6 @@ export const OutletCard: React.FC<OutletCardProps> = ({
           </Text>
         </TouchableOpacity>
       </View>
-
-      {/* Sensor Grid */}
-      {showSensors && (
-        <View style={styles.sensorWrap}>
-          <View style={styles.sensorRow}>
-            <View style={styles.sensorCell}>
-              <SensorReading
-                icon="🌡️"
-                label="Temp"
-                value={
-                  outlet.temperature != null
-                    ? `${outlet.temperature.toFixed(1)}°C`
-                    : '—'
-                }
-                status={
-                  outlet.overheatWarning
-                    ? 'danger'
-                    : outlet.temperature != null && outlet.temperature > 35
-                      ? 'warning'
-                      : 'normal'
-                }
-                disabled={false}
-              />
-            </View>
-            
-            <View style={styles.sensorCell}>
-              <SensorReading
-                icon="⚡"
-                label="Current"
-                value={
-                  outlet.current != null
-                    ? `${outlet.current.toFixed(1)} ${outlet.currentUnit}`
-                    : '—'
-                }
-                status={
-                  outlet.currentWarning
-                    ? 'danger'
-                    : outlet.current != null &&
-                        outlet.currentUnit === 'A' &&
-                        outlet.current > 6
-                      ? 'warning'
-                      : 'normal'
-                }
-                disabled={false}
-              />
-            </View>
-            
-            <View style={styles.sensorCell}>
-              <SensorReading
-                icon="💨"
-                label="Smoke"
-                value={
-                  outlet.smokeValue != null
-                    ? `${outlet.smokeValue.toFixed(0)} ${outlet.smokeUnit}`
-                    : '—'
-                }
-                status={outlet.smokeDetected ? 'danger' : 'normal'}
-                disabled={false}
-              />
-            </View>
-            
-            <View style={styles.sensorCell}>
-              <SensorReading
-                icon="💧"
-                label="Water"
-                value={outlet.waterDetected ? 'Wet' : 'Dry'}
-                status={outlet.waterDetected ? 'danger' : 'normal'}
-                disabled={false}
-              />
-            </View>
-          </View>
-
-          {/* Alerts */}
-          {hasRisk && (
-            <View className="mt-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
-              <Text className="text-xs font-semibold text-red-700">
-                ⚠️ Risk detected - turn off power immediately
-              </Text>
-            </View>
-          )}
-          
-          {!hasRisk && hasWarning && (
-            <View className="mt-4 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <Text className="text-xs font-semibold text-yellow-700">
-                ⚠️ Elevated readings detected
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
     </View>
   );
 };
@@ -342,16 +193,5 @@ const styles = StyleSheet.create({
   },
   powerIconOff: {
     color: '#475569',
-  },
-  sensorWrap: {
-    padding: 16,
-  },
-  sensorRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  sensorCell: {
-    width: '48%',
   },
 });

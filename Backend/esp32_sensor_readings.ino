@@ -26,7 +26,7 @@ const char* OUTLET_4_ID   = "a7028180-df37-4794-ba27-74ded6a0e96c";
 void publishSensorsMqtt();
 
 // Sensor pins
-const int waterPin = 34;
+const int waterPin = 35;
 const int gasPin   = 32;
 const int tempPin  = 33;
 
@@ -84,7 +84,16 @@ int16_t minVal = 0;
 int16_t maxVal = 0;
 int16_t currentValue = 0;
 float currentVoltage = 0.0;
+float currentAmpsRms = 0.0;
 bool overCurrentDetected = false;
+
+// Current transformer (SCT013 100A : 50mA) + burden resistor setup.
+// Ratio: 100A primary -> 0.05A secondary => 2000:1
+static const float CT_TURNS_RATIO = 2000.0f;
+static const float BURDEN_OHMS = 100.0f;
+
+// ADS1115 LSB at GAIN_TWOTHIRDS is 0.1875 mV/bit (per Adafruit lib docs).
+static const float ADS1115_MV_PER_COUNT = 0.1875f;
 
 void publishSensorMqtt(const char* sensorType, float value, const char* unit, JsonObject raw) {
   if (!mqtt.connected()) return;
@@ -133,10 +142,11 @@ void publishSensorsMqtt() {
     StaticJsonDocument<256> rawDoc;
     rawDoc["currentValue"] = currentValue;
     rawDoc["currentVoltage"] = currentVoltage;
+    rawDoc["currentAmpsRms"] = currentAmpsRms;
     rawDoc["overCurrentDetected"] = overCurrentDetected;
     rawDoc["threshold"] = currentRawThreshold;
     JsonObject raw = rawDoc.as<JsonObject>();
-    publishSensorMqtt("current", (float)currentValue, "ads_raw", raw);
+    publishSensorMqtt("current", (float)currentAmpsRms, "A", raw);
   }
 
   // SMOKE
@@ -335,7 +345,7 @@ void connectWiFiIfNeeded() {
 void readSensors() {
   // WATER
   waterValue = analogRead(waterPin);
-  waterDetected = (waterValue > waterThreshold);
+  waterDetected = (waterValue < waterThreshold);
 
   // SMOKE
   smokeValue = analogRead(gasPin);
@@ -351,33 +361,67 @@ void readSensors() {
   minVal = 32767;
   maxVal = -32768;
 
-  for (int i = 0; i < 100; i++) {
+  // Compute RMS current from biased AC waveform.
+  // We sample for a fixed time window to capture multiple mains cycles.
+  const unsigned long sampleWindowMs = 250; // ~12 cycles @50Hz, ~15 @60Hz
+  unsigned long t0 = millis();
+
+  // First pass: gather min/max and mean (bias) in ADC counts.
+  long sum = 0;
+  int n = 0;
+  while (millis() - t0 < sampleWindowMs) {
     mqtt.loop(); // keep MQTT responsive during ADC sampling
     int16_t sample = ads.readADC_SingleEnded(0);
     if (sample < minVal) minVal = sample;
     if (sample > maxVal) maxVal = sample;
+    sum += sample;
+    n++;
   }
 
-  float minVoltage = minVal * 0.1875f / 1000.0f;
-  float maxVoltage = maxVal * 0.1875f / 1000.0f;
+  float mean = (n > 0) ? (float)sum / (float)n : 0.0f;
 
-  currentValue = maxVal - minVal;
-  currentVoltage = maxVoltage - minVoltage;
+  // Second pass: RMS of AC component around mean.
+  // Note: ADS1115 reads are not buffered; we resample for RMS over the same duration.
+  t0 = millis();
+  double sumSq = 0.0;
+  n = 0;
+  while (millis() - t0 < sampleWindowMs) {
+    mqtt.loop();
+    float s = (float)ads.readADC_SingleEnded(0) - mean;
+    sumSq += (double)s * (double)s;
+    n++;
+  }
+
+  float countsRms = (n > 0) ? sqrt((float)(sumSq / (double)n)) : 0.0f;
+
+  // Keep the existing "swing" debug fields as well (peak-to-peak).
+  currentValue = maxVal - minVal; // counts peak-to-peak
+  currentVoltage = (currentValue * ADS1115_MV_PER_COUNT) / 1000.0f; // approx Vpp
+
+  // Convert counts RMS -> volts RMS -> amps RMS.
+  float voltsRms = (countsRms * ADS1115_MV_PER_COUNT) / 1000.0f;
+  float secAmpsRms = (BURDEN_OHMS > 0.0f) ? (voltsRms / BURDEN_OHMS) : 0.0f;
+  currentAmpsRms = secAmpsRms * CT_TURNS_RATIO;
+
+  // Over-current detection remains based on raw swing threshold unless demo is enabled.
   overCurrentDetected = demoOverCurrent || (currentValue > currentRawThreshold);
 
-  // Serial.print("Water Analog value: ");
-  // Serial.println(waterValue);
-  // Serial.println(waterDetected ? "Water detected" : "Dry");
+  Serial.print("Water Analog value: ");
+  Serial.println(waterValue);
+  Serial.println(waterDetected ? "Water detected" : "Dry");
 
   Serial.print("Smoke analog value: ");
   Serial.println(smokeValue);
   Serial.println(smokeDetected ? "Smoke detected" : "No smoke detected");
 
-  // Serial.print("Temperature raw value: ");
-  // Serial.println(tempValue);
-  // Serial.print("Temperature C: ");
-  // Serial.println(temperatureC);
-  // Serial.println(overheatDetected ? "Overheat detected" : "Temperature normal");
+  Serial.print("Temperature raw value: ");
+  Serial.println(tempValue);
+  Serial.print("Temperature C: ");
+  Serial.println(temperatureC);
+  Serial.println(overheatDetected ? "Overheat detected" : "Temperature normal");
+
+  Serial.print("Current (RMS A): ");
+  Serial.println(currentAmpsRms, 3);
 
   // Serial.print("Min ADC: ");
   // Serial.print(minVal);
@@ -469,11 +513,12 @@ void uploadSensors() {
 
     String json = String("{") + String(q) + "device_id" + String(q) + ":" + String(q) + relayDeviceId + String(q) + ","
                 + String(q) + "sensor_type" + String(q) + ":" + String(q) + "current" + String(q) + ","
-                + String(q) + "value" + String(q) + ":" + String(currentValue) + ","
-                + String(q) + "unit" + String(q) + ":" + String(q) + "ads_raw" + String(q) + ","
+                + String(q) + "value" + String(q) + ":" + String(currentAmpsRms, 3) + ","
+                + String(q) + "unit" + String(q) + ":" + String(q) + "A" + String(q) + ","
                 + String(q) + "raw" + String(q) + ":{"
                 + String(q) + "currentValue" + String(q) + ":" + String(currentValue) + ","
                 + String(q) + "currentVoltage" + String(q) + ":" + String(currentVoltage, 4) + ","
+                + String(q) + "currentAmpsRms" + String(q) + ":" + String(currentAmpsRms, 3) + ","
                 + String(q) + "overCurrentDetected" + String(q) + ":" + (overCurrentDetected ? "true" : "false") + ","
                 + String(q) + "threshold" + String(q) + ":" + String(currentRawThreshold)
                 + "}}";

@@ -17,6 +17,7 @@ import { DashboardHeader } from "./components/DashboardHeader";
 import { StatusCard } from "./components/StatusCard";
 import { OutletCard } from "./components/OutletCard";
 import DeviceCard from "./components/DeviceCard";
+import { DeviceSensorsCard, type DeviceSensors } from "./components/DeviceSensorsCard";
 import { Card } from "@/components/ui/card";
 import { Button, ButtonText } from "@/components/ui/button";
 import {
@@ -54,15 +55,6 @@ interface Outlet {
 	dbId?: string;
 	name: string;
 	powerOn: boolean;
-	temperature: number | null;
-	current: number | null;
-	currentUnit: string;
-	smokeValue: number | null;
-	smokeUnit: string;
-	smokeDetected: boolean;
-	waterDetected: boolean;
-	overheatWarning: boolean;
-	currentWarning: boolean;
 }
 
 type DashboardView = "devices" | "deviceDetail";
@@ -102,8 +94,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 
 	const [lastUpdate, setLastUpdate] = useState(new Date());
 	const [outlets, setOutlets] = useState<Outlet[]>([]);
+	const [deviceSensors, setDeviceSensors] = useState<DeviceSensors>(() =>
+		deviceSensorFieldsFromReadings({}),
+	);
 
-	// Load outlets from device_outlets + latest water reading for the selected device (detail view).
+	// Load outlets from device_outlets + latest sensor readings for the selected device (detail view).
 	useEffect(() => {
 		if (view !== "deviceDetail" || !selectedDeviceId) {
 			return;
@@ -130,13 +125,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 					sensorFields = deviceSensorFieldsFromReadings({});
 				}
 
+				setDeviceSensors(sensorFields ?? deviceSensorFieldsFromReadings({}));
 				setOutlets(
 					apiOutlets.map((o, index) => ({
 						id: index + 1,
 						dbId: o.id,
 						name: o.outlet_name,
 						powerOn: o.is_active,
-						...(sensorFields ?? deviceSensorFieldsFromReadings({})),
 					})),
 				);
 				setLastUpdate(new Date());
@@ -182,15 +177,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 							dbId: id,
 							name: outlet_name ?? "Outlet",
 							powerOn: is_active,
-							temperature: null,
-							current: null,
-							currentUnit: "A",
-							smokeValue: null,
-							smokeUnit: "analog",
-							smokeDetected: false,
-							waterDetected: false,
-							overheatWarning: false,
-							currentWarning: false,
 						},
 					];
 				});
@@ -199,11 +185,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 			onSensor: (msg) => {
 				const patch = partialOutletFromSensorPayload(msg);
 				if (Object.keys(patch).length === 0) return;
-				setOutlets((prev) => {
-					if (prev.length === 0) return prev;
-					// Sensor readings are device-wide for now.
-					return prev.map((outlet) => ({ ...outlet, ...patch }));
-				});
+				setDeviceSensors((prev) => ({ ...prev, ...patch }));
 				setLastUpdate(new Date());
 			},
 		});
@@ -327,8 +309,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 	// Device/status helpers (per-device dashboard)
 	const getSystemStatus = () => {
 		const activeOutlets = outlets.filter((o) => o.powerOn);
-		const hasRisk = outlets.some((o) => o.waterDetected || o.smokeDetected);
-		const hasWarning = outlets.some((o) => o.overheatWarning || o.currentWarning);
+		const hasRisk = deviceSensors.waterDetected || deviceSensors.smokeDetected;
+		const hasWarning = deviceSensors.overheatWarning || deviceSensors.currentWarning;
 
 		if (hasRisk) {
 			return {
@@ -578,6 +560,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenSettings
 							activeCount={outlets.filter((o) => o.powerOn).length}
 							totalCount={outlets.length}
 						/>
+
+						<View style={styles.outletsWrap}>
+							<DeviceSensorsCard sensors={deviceSensors} />
+						</View>
 
 						<View style={styles.outletsWrap}>
 							<Text style={styles.sectionTitle}>Power Outlets</Text>
