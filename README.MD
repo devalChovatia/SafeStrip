@@ -1,1 +1,1 @@
-
+SafeStrip is a smart safety-enabled power strip designed to monitor electrical and environmental hazards in real time. The system integrates embedded sensors (current, temperature, gas, and water detection) with a cloud-based backend and a mobile application. The device automatically disconnects power when hazardous conditions are detected and notifies users through the monitoring interface.
